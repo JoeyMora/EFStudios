@@ -45,6 +45,12 @@ It drives star brightness in the Galaxy, the "▲ Rising" filter, the "trending"
 
 ## Quick start
 
+Double-click **`start.command`** on a Mac or **`start.bat`** on Windows, or run `./start.sh` on Linux. The first run creates a private Python environment, installs everything, creates `.env`, and opens **http://127.0.0.1:5005**. It needs Python 3.10+. Step-by-step instructions are in the [top-level README](../README.md).
+
+Your artists are saved in `leads.db` in this folder. Back it up if you care about it.
+
+Prefer doing it by hand?
+
 ```bash
 cd artist-email-finder
 python3 -m venv .venv && source .venv/bin/activate
@@ -53,8 +59,7 @@ cp .env.example .env     # add the keys you have (all optional; see below)
 artist-email-finder serve
 ```
 
-This opens http://127.0.0.1:5005. Your leads are saved in `leads.db` in the folder you run it from.
-
+Once it's open:
 1. **Settings:** set your own engagement (capture your Reels tab and press **This is me**), and edit your email template.
 2. **Discover:** describe who you're looking for.
 3. **Artists / Pipeline:** star the ones you like and move them along as you reach out.
