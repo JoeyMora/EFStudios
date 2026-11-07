@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Artist Finder{% endblock %} · EF Studios</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<nav class="top">
+  <a class="brand" href="{{ url_for('leads') }}">EF Studios · Artist Finder</a>
+  <a class="tab {% if request.endpoint in ('leads', 'lead') %}on{% endif %}" href="{{ url_for('leads') }}">Leads</a>
+  <a class="tab {% if request.endpoint == 'find' %}on{% endif %}" href="{{ url_for('find') }}">Find artists</a>
+  <a class="tab {% if request.endpoint == 'settings_page' %}on{% endif %}" href="{{ url_for('settings_page') }}">My level &amp; settings</a>
+  <span id="jobs-indicator"></span>
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+<script>
+async function copyText(btn, text) {
+  try { await navigator.clipboard.writeText(text); } catch (e) {
+    const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t);
+    t.select(); document.execCommand('copy'); t.remove();
+  }
+  const old = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => btn.textContent = old, 1200);
+}
+async function updateLead(id, data) {
+  await fetch('/api/lead/' + id, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
+}
+let jobsWereRunning = false;
+async function pollJobs() {
+  try {
+    const jobs = await (await fetch('/api/jobs')).json();
+    const running = jobs.filter(j => j.status === 'running' || j.status === 'queued');
+    const el = document.getElementById('jobs-indicator');
+    if (running.length) {
+      const j = running.find(j => j.status === 'running') || running[0];
+      el.innerHTML = '<span class="spin"></span>' + (j.message || j.kind).replace(/</g, '&lt;') +
+        (running.length > 1 ? ' (+' + (running.length - 1) + ' queued)' : '');
+    } else {
+      el.textContent = '';
+    }
+    if (window.onJobs) window.onJobs(jobs);
+    if (jobsWereRunning && !running.length && window.reloadWhenJobsFinish) location.reload();
+    jobsWereRunning = running.length > 0;
+  } catch (e) {}
+}
+pollJobs(); setInterval(pollJobs, 2500);
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

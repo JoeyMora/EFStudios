@@ -1,95 +1,85 @@
-# Artist Email Finder
+# EF Studios Artist Finder
 
-A command-line tool that finds **public contact emails** (booking, management, business) for music artists. It writes a CSV you can work from for outreach.
+Finds artists around your size to reach out to, along with their public booking or management emails. You work through them in a local web app.
 
-It can:
+- **Find artists:** by genre (Spotify, Last.fm, MusicBrainz), by city (MusicBrainz), or "similar to" an artist you name (Last.fm). You can also paste a list of artists you already know.
+- **"Around my level":** enter your own follower counts. Every artist gets a size compared with yours (for example, `1.8×`), and discovery can skip anyone far bigger or smaller.
+- **Find emails:** from their website, Linktree-style pages, Instagram and TikTok (see below), YouTube descriptions and web search. Each email gets a confidence rating.
+- **Work through leads:** filter and sort, star artists, set a status (New → Shortlist → Contacted → Replied / Not a fit), keep notes, copy an email, open a pre-filled email from your template, and export to CSV.
 
-- **Look up artists you name.** Pass names, or a CSV or text file. You can add their links, such as a website, Linktree, `@instagram` or YouTube.
-- **Discover artists for you.** Search by genre on Spotify (with follower filters to target independent artists), or by genre and city/region on MusicBrainz. Then it looks up their emails.
-
-## Where it looks
-
-| Source | What it reads | Key needed |
-|---|---|---|
-| Artist links (MusicBrainz) | Website, socials and YouTube links listed for the artist | none |
-| Websites | Home page, then contact, booking, about, press and EPK pages | none |
-| Link-in-bio pages | Linktree, Beacons, lnk.bio, hoo.be, Stan, Carrd, etc., plus the sites they link to | none |
-| Social bios | Public profile pages whose `robots.txt` allows it (SoundCloud, Bandcamp, ...) | none |
-| YouTube | Channel description and the last 5 video descriptions | `YOUTUBE_API_KEY` |
-| Web search | `"Artist" booking/management email` results | `BRAVE_API_KEY` or `SERPAPI_API_KEY` |
-| Discovery | Spotify genre search | `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET` |
-
-It catches `mailto:` links, plain-text emails and obfuscated ones such as `booking [at] artist [dot] com`. It drops junk: platform addresses, `noreply@`, image filenames and tracking IDs.
-
-**Instagram and TikTok** block automated access (login walls and `robots.txt`), so the tool doesn't read those bios directly. It finds the same info through the artist's Linktree, website, YouTube and web search, which is usually where the bio email is copied from anyway.
-
-## Setup
+## Quick start
 
 ```bash
 cd artist-email-finder
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
-cp .env.example .env    # then paste in whichever API keys you have
+cp .env.example .env     # add the keys you have (all optional; see below)
+artist-email-finder serve
 ```
 
-All keys are optional. Without any keys, it still checks MusicBrainz links and any links you give it.
+This opens http://127.0.0.1:5005. Your leads are saved in `leads.db` in the folder you run it from.
 
-- **YouTube:** in Google Cloud Console, enable "YouTube Data API v3" and create an API key. The free tier is 10,000 units/day. A channel search costs 100, so that's about 90 artists/day. Use `--no-youtube-search` and pass YouTube links yourself to use almost no quota.
-- **Brave Search:** https://brave.com/search/api/ (has a free tier). Or use **SerpAPI** for Google results.
-- **Spotify:** create an app at https://developer.spotify.com/dashboard and copy its client ID and secret.
+1. **My level & settings:** enter your Instagram, Spotify and TikTok numbers, or fetch them automatically. Then edit your email template.
+2. **Find artists:** pick a source and genre, keep "Only artists around my level" ticked, and press Start. Progress shows in the top bar.
+3. **Leads:** go through the list, closest to your size first.
 
-## Usage
+## Instagram & TikTok
+
+Instagram and TikTok block automated access to profile pages, and getting around that would risk a ban on your accounts. The tool uses three approaches that stay within the rules instead.
+
+1. **Instagram Business Discovery (official Meta API).** Your Instagram business or creator account can look up any other business or creator account's bio, website link and follower count. Most artists who take bookings use one of those account types. The bio's website, usually a Linktree, is then checked for an email. The API doesn't expose the in-app "Email" button, and it doesn't work for personal accounts.
+2. **Search-engine snippets.** Google and Brave index public Instagram and TikTok profiles. The tool reads the snippet ("12K Followers … bookings: …") to get follower counts, bio emails and handles. This needs a Brave or SerpAPI key.
+3. **Capture bookmarklet (you browse, it reads).** Drag **Capture artist** from the Settings page to your bookmarks bar. While you're on an artist's Instagram or TikTok profile, click it. Their bio email, follower count and size compared with yours are saved to your leads. Any Linktree or website in their bio is then checked automatically. It only reads the page you're already looking at. It also works on Linktree pages and websites.
+
+You can also paste a bio into an artist's page (**Paste a bio**), or add an email you saw in the Instagram app's Email button by hand.
+
+### Setting up Instagram Business Discovery
+
+You need an Instagram professional (business or creator) account linked to a Facebook Page. Your ad account setup already has this.
+
+1. At https://developers.facebook.com, create an app (type "Business") and add the **Instagram Graph API** product. In the current dashboard this may be called "Instagram API with Facebook Login".
+2. In the **Graph API Explorer**, select your app. Request the permissions `instagram_basic`, `pages_show_list`, `pages_read_engagement` and `business_management`, then generate a user token.
+3. Exchange it for a long-lived token, which lasts about 60 days. Use the Access Token Debugger's "Extend Access Token" button. Put the result in `META_ACCESS_TOKEN`.
+4. Find your Instagram user ID. In the Explorer, run `me/accounts?fields=instagram_business_account{id,username}`. Put that `id` in `IG_USER_ID`.
+
+The limit is about 200 lookups per hour. When the token expires, lookups quietly stop returning Instagram data, so renew it every couple of months.
+
+## API keys (all optional)
+
+| Key | Unlocks | Where |
+|---|---|---|
+| `META_ACCESS_TOKEN`, `IG_USER_ID` | Instagram bio, website and followers | see above |
+| `BRAVE_API_KEY` or `SERPAPI_API_KEY` | Web search for emails, plus Instagram/TikTok profile snippets | brave.com/search/api, serpapi.com |
+| `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | Discover by genre, Spotify followers | developer.spotify.com/dashboard |
+| `LASTFM_API_KEY` | Discover by tag or "similar to", listener counts | last.fm/api/account/create |
+| `YOUTUBE_API_KEY` | Emails in YouTube channel and video descriptions, subscriber counts | Google Cloud Console → YouTube Data API v3 |
+
+With no keys, it still uses MusicBrainz, artist websites, link pages, the bookmarklet and pasted bios.
+
+**Best value for finding artists your size:** Spotify (genre discovery plus follower counts) and Last.fm "similar to". For "similar to", seed it with an artist you've worked with or one at your level, which tends to surface peers.
+
+## How "around my level" works
+
+For each platform where both you and the artist have a number, the tool divides theirs by yours. It then averages those ratios across platforms (a geometric mean). For example, if they have 2× your Instagram followers and 1× your Spotify followers, the result is about 1.4×. By default, 0.25× to 4× counts as "your level"; you can change the range in Settings. Artists with no comparable numbers show as `?`. The default Leads view includes them, so add a handle and re-check, or capture them, to get their size.
+
+When "Only artists around my level" is on, discovery first gets a cheap size number (Spotify or Last.fm) and skips far-off artists before spending a full email lookup on them. Skipped artists are still saved, so they're never checked twice. They appear under the "Bigger" and "Smaller" filters.
+
+## Command line
+
+Everything is also available without the web app:
 
 ```bash
-# A few artists by name
-artist-email-finder lookup "Artist One" "Artist Two"
-
-# Give links to help it (comma-separated after the name)
-artist-email-finder lookup "Artist One, https://linktr.ee/artistone, @artistone"
-
-# From a file -> CSV
-artist-email-finder lookup -i examples/artists.csv -o emails.csv
-
-# Discover 50 independent drill artists on Spotify, then find emails
+artist-email-finder lookup "Artist One" "Artist Two, @artisttwo, linktr.ee/artisttwo" -o emails.csv
+artist-email-finder lookup -i examples/artists.csv -o emails.csv --resume
 artist-email-finder discover --genre drill --max-followers 50000 --limit 50 -o leads.csv
-
-# Discover by genre + city (MusicBrainz)
-artist-email-finder discover --genre "hip hop" --area "Atlanta" --limit 30 -o atl.csv
-
-# Just list discovered artists, no email search
-artist-email-finder discover --genre "r&b" --limit 100 --no-emails -o rnb_artists.csv
-
-# Long run got interrupted? Continue where it left off
-artist-email-finder lookup -i big_list.csv -o emails.csv --resume
+artist-email-finder discover --genre "hip hop" --area Atlanta --source musicbrainz -o atl.csv
 ```
-
-Without installing, run it as `PYTHONPATH=src python3 -m artist_email_finder ...`.
-
-### Input files
-
-- **CSV:** needs a `name` (or `artist`) column. Every other column that looks like a link or `@handle` is used as a link. Other columns, like notes, are ignored.
-- **Text:** one artist per line, such as `Name`, `Name, link, link`, or just a link like `https://linktr.ee/someone`.
-
-### Output columns
-
-`artist, email, confidence, score, sources, found_on, context, genres, followers, location, spotify_url, discovered_via, pages_checked`
-
-There is one row per email found. An artist with no email still gets one row with the email column empty, so you can see who was missed.
-
-**Confidence** (`high` ≥ 80, `medium` ≥ 55, `low` below that) goes up when:
-- the email is on the artist's own pages (bio, link page, site, YouTube) rather than in a search snippet,
-- the email's domain matches the artist's website,
-- it's a role address like `booking@`, `mgmt@` or `info@`,
-- it contains the artist's name,
-- it was seen in more than one source.
-
-Use `--min-confidence medium` to keep only the stronger matches.
 
 ## Being a good citizen
 
-- It obeys `robots.txt`, waits 1s between requests to the same site (`--delay`), and never logs in or gets around blocks.
-- These are business contacts that artists published. When you email them, follow the anti-spam rules: CAN-SPAM in the US, or GDPR/PECR if you contact people in the UK or EU. Use your real name and business address, write a relevant personal pitch, and honour opt-outs right away.
-- Check `found_on` before you send. A `low` result from web search may belong to a blog or venue, not the artist.
+- The tool obeys `robots.txt`, waits between requests to the same site, uses official APIs where they exist, and never logs in or gets around blocks.
+- These are business contacts that artists published. Cold email still has rules: CAN-SPAM in the US, or GDPR/PECR for the UK and EU. Use your real name and business details, send a relevant personal pitch, and honour opt-outs right away.
+- Check where an email came from before sending. A `low` email found only in web search may belong to a blog or venue.
 
 ## Development
 
@@ -100,8 +90,10 @@ pytest
 
 The code lives in `src/artist_email_finder/`:
 
-- `cli.py`: commands, input and output
-- `finder.py`: runs the sources for each artist
-- `extract.py`: finds emails in text and HTML, and filters out junk
-- `scoring.py`: confidence scoring
-- `sources/`: one module per source (`pages`, `musicbrainz`, `spotify`, `youtube`, `websearch`)
+- `web.py` and `templates/`: the web app
+- `store.py`: the SQLite database
+- `jobs.py`: background discovery and lookups
+- `finder.py`: runs every source for one artist
+- `level.py`: size comparison
+- `extract.py` and `scoring.py`: finding emails and rating them
+- `sources/`: Instagram, web search, Spotify, Last.fm, MusicBrainz, YouTube, and the page crawler

@@ -12,18 +12,21 @@ import csv
 import logging
 import re
 import sys
+from itertools import islice
 from pathlib import Path
 
 from .config import Settings, load_dotenv
 from .finder import Finder, normalize_link
-from .http import DEFAULT_USER_AGENT, HttpClient
+from .net import DEFAULT_USER_AGENT, HttpClient
 from .models import Artist, ArtistResult
 from .sources.musicbrainz import MusicBrainz
 from .sources.spotify import Spotify
 
 OUTPUT_FIELDS = [
     "artist", "email", "confidence", "score", "sources", "found_on", "context",
-    "genres", "followers", "location", "spotify_url", "discovered_via", "pages_checked",
+    "instagram", "tiktok", "instagram_followers", "tiktok_followers", "spotify_followers",
+    "lastfm_listeners", "youtube_subscribers", "genres", "location", "spotify_url",
+    "discovered_via", "pages_checked",
 ]
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
 NAME_COLUMNS = ("name", "artist", "artist_name", "artist name")
@@ -75,7 +78,11 @@ def rows_for(result: ArtistResult, min_confidence: str) -> list[dict]:
     base = {
         "artist": a.name,
         "genres": "; ".join(a.genres),
-        "followers": "" if a.followers is None else a.followers,
+        "instagram": result.instagram,
+        "tiktok": result.tiktok,
+        **{k: {**a.metrics, **result.metrics}.get(k, "") for k in (
+            "instagram_followers", "tiktok_followers", "spotify_followers",
+            "lastfm_listeners", "youtube_subscribers")},
         "location": a.location,
         "spotify_url": a.spotify_url,
         "discovered_via": a.discovered_via or "input",
@@ -187,12 +194,19 @@ def cmd_discover(args, settings: Settings, http: HttpClient) -> int:
 
     print(f"Discovering up to {args.limit} artists via {source}...", file=sys.stderr)
     if source == "spotify":
-        artists = Spotify(http, settings.spotify_client_id, settings.spotify_client_secret).discover(
-            args.genre, limit=args.limit, min_followers=args.min_followers,
-            max_followers=args.max_followers, market=args.market)
+        candidates = Spotify(http, settings.spotify_client_id,
+                             settings.spotify_client_secret).discover(args.genre, market=args.market)
+
+        def in_range(a: Artist) -> bool:
+            n = a.metrics.get("spotify_followers")
+            if n is None:
+                return True
+            return ((args.min_followers is None or n >= args.min_followers)
+                    and (args.max_followers is None or n <= args.max_followers))
+        artists = list(islice(filter(in_range, candidates), args.limit))
     else:
-        artists = MusicBrainz(http).discover(genre=args.genre or "", area=args.area or "",
-                                             limit=args.limit)
+        artists = list(islice(MusicBrainz(http).discover(genre=args.genre or "",
+                                                         area=args.area or ""), args.limit))
     print(f"Found {len(artists)} artists.", file=sys.stderr)
     if not artists:
         return 1
@@ -208,6 +222,19 @@ def cmd_discover(args, settings: Settings, http: HttpClient) -> int:
         return 0
     return run_lookup(artists, make_finder(args, settings, http),
                       Path(args.output) if args.output else None, args.resume, args.min_confidence)
+
+
+def cmd_serve(args, settings: Settings, http: HttpClient) -> int:
+    from .web import create_app
+    app = create_app(args.db, settings)
+    url = f"http://{args.host}:{args.port}/"
+    print(f"Artist Finder running at {url}  (Ctrl+C to stop)", file=sys.stderr)
+    if not args.no_browser:
+        import threading
+        import webbrowser
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    app.run(host=args.host, port=args.port, debug=False, threaded=True)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -258,6 +285,13 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--no-emails", action="store_true",
                    help="just list the artists; don't search for emails")
     d.set_defaults(func=cmd_discover)
+
+    s = sub.add_parser("serve", help="open the web app for finding and working through leads")
+    s.add_argument("--db", default="leads.db", help="database file (default: leads.db)")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=5005)
+    s.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
+    s.set_defaults(func=cmd_serve)
     return parser
 
 
@@ -267,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
                         format="%(levelname)s %(name)s: %(message)s")
     load_dotenv(args.env_file)
     settings = Settings.from_env()
-    http = HttpClient(user_agent=DEFAULT_USER_AGENT, per_host_delay=args.delay)
+    http = HttpClient(user_agent=DEFAULT_USER_AGENT, per_host_delay=getattr(args, "delay", 1.0))
     try:
         return args.func(args, settings, http)
     except KeyboardInterrupt:

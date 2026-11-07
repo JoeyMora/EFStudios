@@ -7,11 +7,15 @@ import re
 from urllib.parse import urlparse
 
 from .config import Settings
-from .http import HttpClient
+from .extract import context_for, emails_from_text
 from .models import Artist, ArtistResult, Finding
+from .net import HttpClient
 from .scoring import name_tokens, rank
+from .sources.instagram import InstagramGraph, instagram_handle, tiktok_handle
+from .sources.lastfm import LastFm
 from .sources.musicbrainz import MusicBrainz
 from .sources.pages import PageCrawler, classify, host_of, is_artist_site_candidate, social_platform
+from .sources.spotify import Spotify
 from .sources.websearch import WebSearch
 from .sources.youtube import YouTube
 
@@ -36,10 +40,19 @@ def _url_mentions_artist(url: str, artist_name: str) -> bool:
     return any(t in folded for t in name_tokens(artist_name))
 
 
+def _crawlable(link: str) -> bool:
+    """Pages we fetch directly. Instagram/TikTok/YouTube are handled by their
+    own steps (official APIs and search snippets), not by fetching the page."""
+    if social_platform(link) in {"youtube", "instagram", "tiktok"}:
+        return False
+    return classify(link) != "website" or is_artist_site_candidate(link)
+
+
 class Finder:
     def __init__(self, settings: Settings, http: HttpClient | None = None, *,
                  use_musicbrainz: bool = True, use_youtube: bool = True,
                  use_web_search: bool = True, youtube_search: bool = True,
+                 use_instagram: bool = True, social_search: bool = True,
                  max_pages: int = 12):
         self.http = http or HttpClient()
         self.crawler = PageCrawler(self.http, max_pages=max_pages)
@@ -48,21 +61,28 @@ class Finder:
                         if use_youtube and settings.youtube_api_key else None)
         self.web_search = (WebSearch(self.http, settings.brave_api_key, settings.serpapi_api_key)
                            if use_web_search and settings.has_web_search else None)
+        self.social_search = bool(self.web_search and social_search)
+        self.instagram = (InstagramGraph(self.http, settings.meta_access_token,
+                                         settings.ig_user_id, settings.graph_api_version)
+                          if use_instagram and settings.has_instagram else None)
+        self.spotify = (Spotify(self.http, settings.spotify_client_id, settings.spotify_client_secret)
+                        if settings.has_spotify else None)
+        self.lastfm = LastFm(self.http, settings.lastfm_api_key) if settings.lastfm_api_key else None
 
     def enabled_sources(self) -> list[str]:
         names = ["pages"]
-        if self.musicbrainz:
-            names.append("musicbrainz")
-        if self.youtube:
-            names.append("youtube")
-        if self.web_search:
-            names.append("web_search")
+        for attr in ("musicbrainz", "instagram", "youtube", "web_search", "spotify", "lastfm"):
+            if getattr(self, attr):
+                names.append(attr)
+        if self.social_search:
+            names.append("social_search")
         return names
 
     def lookup(self, artist: Artist) -> ArtistResult:
-        result = ArtistResult(artist=artist)
+        result = ArtistResult(artist=artist, metrics=dict(artist.metrics))
         findings: list[Finding] = []
         links: list[str] = []
+        crawled: set[str] = set()
 
         def add_links(new):
             for link in new:
@@ -70,37 +90,123 @@ class Finder:
                 if link and link not in links:
                     links.append(link)
 
-        add_links(artist.links)
+        def crawl_new():
+            todo = [l for l in links if _crawlable(l) and l not in crawled]
+            if not todo:
+                return
+            crawled.update(todo)
+            page_findings, checked, discovered = self.crawler.crawl(todo)
+            findings.extend(page_findings)
+            result.pages_checked.extend(checked)
+            add_links(discovered)
 
+        add_links(artist.links)
+        if artist.spotify_url:
+            add_links([artist.spotify_url])
+
+        # 1. Links the artist has listed publicly (MusicBrainz).
         if self.musicbrainz and artist.discovered_via != "musicbrainz":
             mb_links = self.musicbrainz.find_links(artist.name)
             if mb_links:
                 result.notes.append(f"musicbrainz: {len(mb_links)} links")
             add_links(mb_links)
 
+        # 2. General web search.
         if self.web_search:
             ws_findings, ws_urls = self.web_search.find(artist.name)
             findings.extend(ws_findings)
-            # Only follow results that look like the artist's own pages.
             add_links(u for u in ws_urls
                       if _url_mentions_artist(u, artist.name)
-                      and (classify(u) != "website" or is_artist_site_candidate(u)))
+                      and (classify(u) != "website" or is_artist_site_candidate(u)
+                           or social_platform(u) in {"instagram", "tiktok"}))
 
-        crawl = [l for l in links
-                 if social_platform(l) != "youtube"
-                 and (classify(l) != "website" or is_artist_site_candidate(l))]
-        page_findings, checked, discovered = self.crawler.crawl(crawl)
-        findings.extend(page_findings)
-        result.pages_checked.extend(checked)
+        # 3. Websites and link-in-bio pages (also reveals social handles).
+        crawl_new()
 
+        # 4. Instagram and TikTok.
+        ig = next((h for h in map(instagram_handle, links) if h), "")
+        tt = next((h for h in map(tiktok_handle, links) if h), "")
+
+        ig_tried = ig
+        if self.instagram and ig:
+            ig_findings, info = self.instagram.find(ig)
+            findings.extend(ig_findings)
+            if info:
+                if info.get("instagram_followers") is not None:
+                    result.metrics["instagram_followers"] = info["instagram_followers"]
+                if info.get("website"):
+                    add_links([info["website"]])
+                    crawl_new()  # their bio link: usually a Linktree with the email
+            else:
+                result.notes.append("instagram: not a business/creator account (or not found)")
+
+        if self.social_search:
+            for platform in ("instagram", "tiktok"):
+                handle = ig if platform == "instagram" else tt
+                if platform == "instagram" and "instagram_followers" in result.metrics:
+                    continue  # already have it from the official API
+                prof = self.web_search.profile(platform, handle=handle, name=artist.name)
+                if not prof:
+                    continue
+                if platform == "instagram":
+                    ig = ig or prof["handle"]
+                else:
+                    tt = tt or prof["handle"]
+                if prof["followers"] is not None:
+                    result.metrics[f"{platform}_followers"] = prof["followers"]
+                for email in emails_from_text(prof["text"]):
+                    findings.append(Finding(email, "social_bio", prof["url"],
+                                            context_for(email, prof["text"])))
+
+        # Got a handle from search only after the official-API step? Try it now.
+        if self.instagram and ig and ig != ig_tried:
+            ig_findings, info = self.instagram.find(ig)
+            findings.extend(ig_findings)
+            if info.get("instagram_followers") is not None:
+                result.metrics["instagram_followers"] = info["instagram_followers"]
+            if info.get("website"):
+                add_links([info["website"]])
+                crawl_new()
+
+        result.instagram, result.tiktok = ig, tt
+        if ig:
+            add_links([f"https://www.instagram.com/{ig}/"])
+        if tt:
+            add_links([f"https://www.tiktok.com/@{tt}"])
+
+        # 5. YouTube descriptions.
         if self.youtube:
-            yt_findings, yt_urls = self.youtube.find(artist.name, links + discovered)
+            yt_findings, info = self.youtube.find(artist.name, links)
             findings.extend(yt_findings)
-            result.pages_checked.extend(yt_urls)
+            if info:
+                add_links([info["url"]])
+                result.pages_checked.append(info["url"])
+                if info.get("subscribers") is not None:
+                    result.metrics["youtube_subscribers"] = info["subscribers"]
 
-        site_domains = {host_of(l) for l in crawl if classify(l) == "website"}
+        # 6. Audience size, for level matching.
+        if self.spotify and "spotify_followers" not in result.metrics:
+            sp = self.spotify.lookup(artist.name)
+            if sp:
+                result.metrics.update(sp.metrics)
+                if not artist.spotify_url:
+                    artist.spotify_url = sp.spotify_url
+                if not artist.genres:
+                    artist.genres = sp.genres
+        if self.lastfm and "lastfm_listeners" not in result.metrics:
+            info = self.lastfm.info(artist.name)
+            if info.get("listeners") is not None:
+                result.metrics["lastfm_listeners"] = info["listeners"]
+            if not artist.genres and info.get("tags"):
+                artist.genres = info["tags"][:5]
+
+        site_domains = {host_of(l) for l in crawled if classify(l) == "website"}
+        result.website = (next((l for l in links if classify(l) == "website"
+                                and is_artist_site_candidate(l)), "")
+                          or next((l for l in links if classify(l) == "link_page"), ""))
+        result.links = links
         result.emails = rank(findings, artist.name, site_domains)
         if not links and not self.web_search and not self.youtube:
             result.notes.append("no links to check: add a website/social link, "
-                                "or set YOUTUBE_API_KEY / BRAVE_API_KEY")
+                                "or set BRAVE_API_KEY / YOUTUBE_API_KEY")
         return result

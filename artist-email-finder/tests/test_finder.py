@@ -49,3 +49,42 @@ def test_read_csv(tmp_path):
     [a] = read_artists(f)
     assert a.name == "Lil Nova"
     assert a.links == ["@lilnova", "lilnova.com"]
+
+
+class FakeSearch:
+    def find(self, name):
+        return [], []
+
+    def profile(self, platform, handle="", name=""):
+        if platform == "instagram":
+            return {"handle": "lilnova", "url": "https://www.instagram.com/lilnova/",
+                    "text": "9K Followers, 10 Following - Lil Nova (@lilnova)", "followers": 9000}
+        return {"handle": "lilnova", "url": "https://www.tiktok.com/@lilnova",
+                "text": "Lil Nova (@lilnova) on TikTok | 40K Followers. mgmt: nova@team.co",
+                "followers": 40000}
+
+
+class FakeGraph:
+    def __init__(self):
+        self.calls = []
+
+    def find(self, handle):
+        self.calls.append(handle)
+        return ([], {"instagram_followers": 9100, "website": "https://linktr.ee/lilnova"})
+
+
+def test_finder_instagram_and_tiktok_paths():
+    http = FakeHttp()
+    finder = Finder(Settings(), http, use_musicbrainz=False)
+    finder.web_search, finder.social_search = FakeSearch(), True
+    finder.instagram = FakeGraph()
+    from artist_email_finder.models import Artist
+    result = finder.lookup(Artist(name="Lil Nova"))
+    # Handle found via search, then the official API, whose bio link is crawled.
+    assert finder.instagram.calls == ["lilnova"]
+    assert "https://linktr.ee/lilnova" in http.fetched
+    assert result.instagram == "lilnova" and result.tiktok == "lilnova"
+    assert result.metrics == {"instagram_followers": 9100, "tiktok_followers": 40000}
+    assert [e.email for e in result.emails] == ["booking@lilnova.com", "nova@team.co"]
+    # Instagram/TikTok pages themselves are never fetched directly.
+    assert not any("instagram.com" in u or "tiktok.com" in u for u in http.fetched)

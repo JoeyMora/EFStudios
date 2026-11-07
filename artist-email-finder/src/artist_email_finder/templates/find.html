@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Find artists{% endblock %}
+{% block content %}
+<h1>Find artists</h1>
+<p class="muted">New artists land in <a href="{{ url_for('leads') }}">Leads</a>. Artists already in your list are skipped.</p>
+{% if not has_level %}
+<div class="notice">Tip: set your follower counts in <a href="{{ url_for('settings_page') }}">My level</a>. Then "Only artists around my level" skips anyone much bigger or smaller than you.</div>
+{% endif %}
+
+<div class="grid2">
+<form class="panel" method="post" action="{{ url_for('discover') }}">
+  <h2>Discover new artists</h2>
+  <label>Where to look</label>
+  <select name="source" id="source" style="width:100%">
+    <option value="spotify" {% if not s.has_spotify %}disabled{% endif %}>Spotify: by genre{% if not s.has_spotify %} (needs Spotify keys){% endif %}</option>
+    <option value="similar" {% if not s.lastfm_api_key %}disabled{% endif %}>Last.fm: similar to an artist{% if not s.lastfm_api_key %} (needs Last.fm key){% endif %}</option>
+    <option value="lastfm" {% if not s.lastfm_api_key %}disabled{% endif %}>Last.fm: by genre tag{% if not s.lastfm_api_key %} (needs Last.fm key){% endif %}</option>
+    <option value="musicbrainz">MusicBrainz: by genre and/or city (no key)</option>
+  </select>
+  <div id="f-genre"><label>Genre</label><input type="text" name="genre" placeholder="e.g. drill, r&b, alt pop, afrobeats" style="width:100%"></div>
+  <div id="f-seed"><label>Similar to (an artist around your level, or one of your clients)</label><input type="text" name="seed" placeholder="Artist name" style="width:100%"></div>
+  <div id="f-area"><label>City / region / country</label><input type="text" name="area" placeholder="e.g. Atlanta" style="width:100%"></div>
+  <label>How many to add</label><input type="number" name="limit" value="25" min="1" max="500">
+  <div style="margin-top:12px">
+    <label class="inline"><input type="checkbox" name="only_my_level" {% if has_level %}checked{% else %}disabled{% endif %}> Only artists around my level{% if not has_level %} <span class="muted">(set My level first)</span>{% endif %}</label><br>
+    <label class="inline" style="margin-top:6px"><input type="checkbox" name="find_emails" checked> Find emails now</label>
+  </div>
+  <div style="margin-top:14px"><button class="primary">Start</button></div>
+  <p class="small muted">Spotify lists the most popular artists first. With "around my level" on, it digs deeper to reach artists your size, which takes longer.</p>
+</form>
+
+<form class="panel" method="post" action="{{ url_for('lookup') }}">
+  <h2>Look up artists you already know</h2>
+  <p class="small muted">One per line. Add links or handles after a comma to help: <code class="k">Name, @instagram, linktr.ee/name</code>. Or paste just a profile link.</p>
+  <textarea name="lines" rows="9" placeholder="Artist One&#10;Artist Two, @artisttwo&#10;https://www.tiktok.com/@artistthree&#10;https://linktr.ee/artistfour"></textarea>
+  <div style="margin-top:10px"><button class="primary">Look up</button></div>
+</form>
+</div>
+
+<div class="panel">
+  <h2>Jobs</h2>
+  <table class="jobs" id="jobs">
+    <thead><tr><th>#</th><th>What</th><th>Status</th><th>Progress</th><th>Details</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Sources</h2>
+  <table>
+  {% for name, ok in status.items() %}
+    <tr><td>{{ name }}</td><td class="{{ 'ok' if ok else 'no' }}">{{ 'connected' if ok else 'not set up' }}</td></tr>
+  {% endfor %}
+    <tr><td>Websites, link-in-bio pages, MusicBrainz</td><td class="ok">always on</td></tr>
+  </table>
+  <p class="small muted">Add API keys in the <code class="k">.env</code> file, then restart. See the README for how to get each one.</p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const src = document.getElementById('source');
+function syncFields() {
+  const v = src.value;
+  document.getElementById('f-genre').style.display = v === 'similar' ? 'none' : '';
+  document.getElementById('f-seed').style.display = v === 'similar' ? '' : 'none';
+  document.getElementById('f-area').style.display = v === 'musicbrainz' ? '' : 'none';
+}
+const firstEnabled = [...src.options].find(o => !o.disabled);
+if (src.selectedOptions[0].disabled && firstEnabled) src.value = firstEnabled.value;
+src.addEventListener('change', syncFields); syncFields();
+
+function describe(j) {
+  const p = j.params || {};
+  if (j.kind === 'discover') {
+    const what = p.source === 'similar' ? 'similar to ' + p.seed : [p.genre, p.area].filter(Boolean).join(' · ');
+    return 'Discover ' + p.limit + ' · ' + p.source + ' · ' + what + (p.only_my_level ? ' · my level' : '');
+  }
+  if (j.kind === 'lookup') return 'Look up ' + (p.lines || []).length + ' artists';
+  return 'Re-check ' + (p.lead_ids || []).length + ' artist(s)';
+}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+window.onJobs = jobs => {
+  document.querySelector('#jobs tbody').innerHTML = jobs.map(j => {
+    const pct = j.total ? Math.round(100 * j.progress / j.total) : 0;
+    const active = j.status === 'running' || j.status === 'queued';
+    return `<tr><td>${j.id}</td><td>${esc(describe(j))}</td><td>${j.status}</td>
+      <td>${j.total ? `<div class="progress"><div style="width:${pct}%"></div></div><span class="small muted">${j.progress}/${j.total}</span>` : ''}</td>
+      <td class="small">${esc(j.message)}</td>
+      <td>${active ? `<form method="post" action="/jobs/${j.id}/cancel"><button class="copy">Stop</button></form>` : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted">No jobs yet.</td></tr>';
+};
+</script>
+{% endblock %}

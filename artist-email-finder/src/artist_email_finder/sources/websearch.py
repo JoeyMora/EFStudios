@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
+import re
 
+from ..counts import followers_in
 from ..extract import context_for, emails_from_text
-from ..http import HttpClient
+from ..net import HttpClient
 from ..models import Finding
+from ..scoring import name_similarity
+from .instagram import instagram_handle, tiktok_handle
 
 log = logging.getLogger(__name__)
 
@@ -59,3 +63,32 @@ class WebSearch:
             if r["url"]:
                 urls.append(r["url"])
         return findings, urls
+
+    def profile(self, platform: str, handle: str = "", name: str = "") -> dict | None:
+        """Find an Instagram/TikTok profile in search results and read its snippet.
+
+        Search engines index public profile pages, and their snippets usually
+        include the follower count and part of the bio. With a handle this reads
+        that profile. With only a name it looks for a profile titled with it.
+        Returns {"handle", "url", "text", "followers"} or None.
+        """
+        site = {"instagram": "instagram.com", "tiktok": "tiktok.com"}[platform]
+        parse = instagram_handle if platform == "instagram" else tiktok_handle
+        query = f"site:{site} @{handle}" if handle else f'site:{site} "{name}"'
+        for r in self.search(query):
+            found = parse(r["url"])
+            if not found:
+                continue
+            if handle:
+                if found != handle.lower():
+                    continue
+            else:
+                # Titles look like "Name (@handle) • Instagram photos and videos"
+                # or "Name (@handle) | TikTok".
+                title_name = re.split(r"\(@|[|•]", r["title"])[0].strip()
+                if max(name_similarity(name, title_name), name_similarity(name, found)) < 0.85:
+                    continue
+            text = f"{r['title']} {r['snippet']}"
+            return {"handle": found, "url": r["url"], "text": text,
+                    "followers": followers_in(text)}
+        return None

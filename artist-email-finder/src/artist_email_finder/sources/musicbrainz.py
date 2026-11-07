@@ -6,8 +6,9 @@ API terms ask for at most 1 request per second and a descriptive User-Agent.
 from __future__ import annotations
 
 import logging
+from typing import Iterator
 
-from ..http import HttpClient
+from ..net import HttpClient
 from ..models import Artist
 from ..scoring import name_similarity
 
@@ -50,24 +51,21 @@ class MusicBrainz:
                 return self.urls_for(cand["id"])
         return []
 
-    def discover(self, genre: str = "", area: str = "", limit: int = 50) -> list[Artist]:
+    def discover(self, genre: str = "", area: str = "") -> Iterator[Artist]:
         clauses = []
         if genre:
             clauses.append(f'tag:"{_lucene_escape(genre)}"')
         if area:
             clauses.append(f'(area:"{_lucene_escape(area)}" OR beginarea:"{_lucene_escape(area)}")')
         if not clauses:
-            raise ValueError("MusicBrainz discovery needs --genre and/or --area")
+            raise ValueError("MusicBrainz discovery needs a genre and/or an area")
         query = " AND ".join(clauses)
-
-        artists: list[Artist] = []
         offset = 0
-        while len(artists) < limit:
-            page = min(100, limit - len(artists))
-            data = self._get("artist", {"query": query, "limit": page, "offset": offset})
+        while offset < 2000:
+            data = self._get("artist", {"query": query, "limit": 100, "offset": offset})
             batch = (data or {}).get("artists", [])
             if not batch:
-                break
+                return
             for a in batch:
                 tags = [t["name"] for t in sorted(a.get("tags", []),
                                                   key=lambda t: -t.get("count", 0))][:5]
@@ -75,6 +73,5 @@ class MusicBrainz:
                 artist = Artist(name=a["name"], genres=tags, location=location,
                                 discovered_via="musicbrainz")
                 artist.links = self.urls_for(a["id"])
-                artists.append(artist)
+                yield artist
             offset += len(batch)
-        return artists[:limit]

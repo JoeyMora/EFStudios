@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}My level & settings{% endblock %}
+{% block content %}
+<h1>My level &amp; settings</h1>
+{% if message %}<div class="notice good">{{ message }}</div>{% endif %}
+{% if request.args.get('note') %}<div class="notice">{{ request.args.get('note') }}</div>{% endif %}
+
+<div class="grid2">
+<div>
+<form class="panel" method="post">
+  <h2>My level</h2>
+  <p class="small muted">Your own numbers. Each artist's size is compared with yours on every platform where both numbers are known. Fill in whichever you have; Instagram and Spotify matter most.</p>
+  <div class="metric-grid">
+    {% for key, label in METRICS.items() %}
+    <div><label>{{ label }}</label><input type="text" name="my_{{ key }}" value="{{ s.get('my_' ~ key, '') }}" placeholder="e.g. 4.2K" style="width:100%"></div>
+    {% endfor %}
+  </div>
+  <h2 style="margin-top:18px">"Around my level" means</h2>
+  <div class="row">
+    from <input type="number" step="0.05" min="0.01" name="level_low" value="{{ s.level_low }}" style="width:80px">×
+    to <input type="number" step="0.5" min="1" name="level_high" value="{{ s.level_high }}" style="width:80px">× my size
+  </div>
+  <p class="small muted">Default 0.25× to 4×: if you have 5K followers, that's artists with about 1.25K to 20K.</p>
+
+  <h2 style="margin-top:18px">Email template</h2>
+  <p class="small muted">Used by the "Email" button on an artist page. <code class="k">{artist}</code> and <code class="k">{first_name}</code> are filled in.</p>
+  <label>Subject</label><input type="text" name="email_subject" value="{{ s.email_subject }}" style="width:100%">
+  <label>Body</label><textarea name="email_body" rows="8">{{ s.email_body }}</textarea>
+  <div style="margin-top:12px"><button class="primary">Save</button></div>
+</form>
+</div>
+
+<div>
+<form class="panel" method="post" action="{{ url_for('autofill') }}">
+  <h2>Fill in my numbers automatically</h2>
+  <label>My Instagram handle {% if not status['Instagram Business Discovery'] %}<span class="muted">(needs Meta keys)</span>{% endif %}</label>
+  <input type="text" name="my_instagram" value="{{ s.get('my_instagram', '') }}" placeholder="@yourhandle" style="width:100%">
+  <label>My Spotify artist link {% if not status['Spotify (discovery, followers)'] %}<span class="muted">(needs Spotify keys)</span>{% endif %}</label>
+  <input type="text" name="my_spotify_url" value="{{ s.get('my_spotify_url', '') }}" placeholder="https://open.spotify.com/artist/..." style="width:100%">
+  <label>My Last.fm artist name {% if not status['Last.fm (discovery, listeners)'] %}<span class="muted">(needs Last.fm key)</span>{% endif %}</label>
+  <input type="text" name="my_lastfm_name" value="{{ s.get('my_lastfm_name', '') }}" style="width:100%">
+  <div style="margin-top:12px"><button>Fetch my numbers</button></div>
+</form>
+
+<div class="panel" id="capture">
+  <h2>Capture bookmarklet (Instagram &amp; TikTok)</h2>
+  <p class="small">Drag this to your bookmarks bar:</p>
+  <p><a class="bookmarklet" href="{{ bookmarklet }}" onclick="alert('Drag this button to your bookmarks bar, then click it while viewing an artist\'s profile.'); return false;">Capture artist</a></p>
+  <ol class="small">
+    <li>Open an artist's Instagram or TikTok profile in your browser (logged in as normal).</li>
+    <li>Click <b>Capture artist</b> in your bookmarks bar.</li>
+    <li>A tab opens here with their bio email, follower count, and their size compared with yours. If the bio has a Linktree or website, it's checked automatically.</li>
+  </ol>
+  <p class="small muted">It only reads the page you're looking at. It also works on Linktree pages and artist websites. Keep this app running while you browse.</p>
+</div>
+
+<div class="panel">
+  <h2>Sources</h2>
+  <table>
+  {% for name, ok in status.items() %}
+    <tr><td>{{ name }}</td><td class="{{ 'ok' if ok else 'no' }}">{{ 'connected' if ok else 'not set up' }}</td></tr>
+  {% endfor %}
+  </table>
+  <p class="small muted">API keys go in the <code class="k">.env</code> file next to the app. Restart after changing it.</p>
+</div>
+</div>
+</div>
+{% endblock %}

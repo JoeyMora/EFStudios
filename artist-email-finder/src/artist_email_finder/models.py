@@ -10,7 +10,9 @@ class Artist:
     name: str
     links: list[str] = field(default_factory=list)
     genres: list[str] = field(default_factory=list)
-    followers: int | None = None
+    # Size metrics: spotify_followers, instagram_followers, tiktok_followers,
+    # lastfm_listeners, youtube_subscribers.
+    metrics: dict[str, int] = field(default_factory=dict)
     location: str = ""
     spotify_url: str = ""
     discovered_via: str = ""
@@ -43,3 +45,8 @@ class ArtistResult:
     emails: list[EmailResult] = field(default_factory=list)
     pages_checked: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    instagram: str = ""     # handle
+    tiktok: str = ""        # handle
+    website: str = ""
+    links: list[str] = field(default_factory=list)   # every artist link seen
+    metrics: dict[str, int] = field(default_factory=dict)

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Captured{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Captured {{ lead.name }}</h1>
+  {% if emails %}
+    <div class="notice good">Found {{ emails|length }} email{{ '' if emails|length == 1 else 's' }}: <span class="email">{{ emails|join(', ') }}</span></div>
+  {% elif queued %}
+    <div class="notice">No email in the bio, so I'm checking the links in it (like their Linktree) in the background.</div>
+  {% else %}
+    <div class="notice">No email in the bio. You can paste one in by hand on the artist page.</div>
+  {% endif %}
+  {% for k, v in metrics.items() %}<p>{{ METRICS[k] }}: <b>{{ v|compact }}</b></p>{% endfor %}
+  <p><span class="badge lvl-{{ lead.level_bucket }}">{{ lead.level_ratio|ratio }} your size</span></p>
+  <p><a class="btn primary" href="{{ url_for('lead', lead_id=lead.id) }}">Open artist</a>
+     <a class="btn" href="javascript:window.close()">Close tab</a></p>
+</div>
+{% endblock %}

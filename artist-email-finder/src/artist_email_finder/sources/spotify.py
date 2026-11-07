@@ -1,7 +1,7 @@
 """Spotify Web API: discover artists by genre (needs a free developer app).
 
 Spotify doesn't expose an artist's location, so --area is applied through
-MusicBrainz instead. Follower counts let you target smaller, independent artists.
+MusicBrainz instead. Follower counts are used for level matching.
 Some fields (followers, genres) may be absent depending on your app's access
 level; filters are skipped for artists that don't have them.
 """
@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Iterator
 
-from ..http import HttpClient
+from ..net import HttpClient
 from ..models import Artist
+from ..scoring import name_similarity
 
 log = logging.getLogger(__name__)
 
@@ -39,38 +41,48 @@ class Spotify:
             self._token_expiry = time.time() + int(data.get("expires_in", 3600))
         return {"Authorization": f"Bearer {self._token}"}
 
-    def discover(self, genre: str, limit: int = 50, min_followers: int | None = None,
-                 max_followers: int | None = None, market: str = "US",
-                 extra_query: str = "") -> list[Artist]:
+    def _search(self, query: str, offset: int, page_size: int, market: str) -> list[dict] | None:
+        params = {"q": query, "type": "artist", "limit": page_size, "offset": offset, "market": market}
+        data = self.http.get_json(f"{API}/search", params=params,
+                                  headers=self._auth_header(), delay=0.2)
+        if data is None:
+            return None
+        return ((data.get("artists") or {}).get("items")) or []
+
+    @staticmethod
+    def _to_artist(item: dict, default_genre: str = "") -> Artist:
+        followers = (item.get("followers") or {}).get("total")
+        return Artist(
+            name=item["name"],
+            genres=item.get("genres") or ([default_genre] if default_genre else []),
+            metrics={"spotify_followers": followers} if followers is not None else {},
+            spotify_url=(item.get("external_urls") or {}).get("spotify", ""),
+            discovered_via="spotify",
+        )
+
+    def artist(self, artist_id: str) -> Artist | None:
+        data = self.http.get_json(f"{API}/artists/{artist_id}", headers=self._auth_header())
+        return self._to_artist(data) if data and data.get("name") else None
+
+    def lookup(self, name: str, market: str = "US") -> Artist | None:
+        """Exact-name match, for filling in follower counts."""
+        items = self._search(f'artist:"{name}"', 0, 10, market) or []
+        for item in items:
+            if name_similarity(name, item["name"]) >= 0.95:
+                return self._to_artist(item)
+        return None
+
+    def discover(self, genre: str, market: str = "US", extra_query: str = "") -> Iterator[Artist]:
+        """Artists in a genre, most popular first (Spotify allows paging to 1,000)."""
         query = f'genre:"{genre}"' + (f" {extra_query}" if extra_query else "")
-        artists: list[Artist] = []
         offset, page_size = 0, 50
-        while len(artists) < limit and offset < 1000:
-            params = {"q": query, "type": "artist", "limit": page_size,
-                      "offset": offset, "market": market}
-            data = self.http.get_json(f"{API}/search", params=params,
-                                      headers=self._auth_header(), delay=0.2)
-            if data is None and page_size > 10:
-                page_size = 10  # some app tiers cap search page size
+        while offset < 1000:
+            items = self._search(query, offset, page_size, market)
+            if items is None and page_size > 10:
+                page_size = 10  # some app tiers cap the search page size
                 continue
-            items = ((data or {}).get("artists") or {}).get("items") or []
             if not items:
-                break
+                return
             for item in items:
-                followers = (item.get("followers") or {}).get("total")
-                if followers is not None:
-                    if min_followers is not None and followers < min_followers:
-                        continue
-                    if max_followers is not None and followers > max_followers:
-                        continue
-                artists.append(Artist(
-                    name=item["name"],
-                    genres=item.get("genres") or [genre],
-                    followers=followers,
-                    spotify_url=(item.get("external_urls") or {}).get("spotify", ""),
-                    discovered_via="spotify",
-                ))
-                if len(artists) >= limit:
-                    break
+                yield self._to_artist(item, genre)
             offset += len(items)
-        return artists

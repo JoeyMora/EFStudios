@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Leads{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>Leads</h1>
+  <span class="spacer"></span>
+  <a class="btn" href="{{ export_url }}">Export CSV</a>
+  <a class="btn primary" href="{{ url_for('find') }}">+ Find artists</a>
+</div>
+<div class="stats muted">
+  <span><b>{{ counts.all }}</b> artists</span>
+  <span><b>{{ counts.with_email }}</b> with email</span>
+  <span><b>{{ counts.get('shortlist', 0) }}</b> shortlisted</span>
+  <span><b>{{ counts.get('contacted', 0) }}</b> contacted</span>
+  <span><b>{{ counts.get('replied', 0) }}</b> replied</span>
+</div>
+
+{% if not has_level %}
+<div class="notice">Set your own follower counts in <a href="{{ url_for('settings_page') }}">My level</a> to see which artists are around your size.</div>
+{% endif %}
+
+<form class="panel filters" method="get">
+  <input type="search" name="q" value="{{ f.q }}" placeholder="Search name, email, handle, notes">
+  <select name="status">
+    <option value="active" {% if f.status == 'active' %}selected{% endif %}>All except "not a fit"</option>
+    <option value="" {% if f.status == '' %}selected{% endif %}>Any status</option>
+    {% for s in STATUSES %}<option value="{{ s }}" {% if f.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}
+  </select>
+  <select name="level">
+    <option value="" {% if f.level == '' %}selected{% endif %}>Any size</option>
+    <option value="match+unknown" {% if f.level == 'match+unknown' %}selected{% endif %}>My level + unknown</option>
+    <option value="match" {% if f.level == 'match' %}selected{% endif %}>My level</option>
+    <option value="bigger" {% if f.level == 'bigger' %}selected{% endif %}>Bigger than my range</option>
+    <option value="smaller" {% if f.level == 'smaller' %}selected{% endif %}>Smaller than my range</option>
+    <option value="unknown" {% if f.level == 'unknown' %}selected{% endif %}>Size unknown</option>
+  </select>
+  <select name="has_email">
+    <option value="">Email: any</option>
+    <option value="yes" {% if f.has_email == 'yes' %}selected{% endif %}>Has email</option>
+    <option value="no" {% if f.has_email == 'no' %}selected{% endif %}>No email yet</option>
+  </select>
+  <select name="min_confidence">
+    <option value="">Any confidence</option>
+    <option value="medium" {% if f.min_confidence == 'medium' %}selected{% endif %}>Medium+</option>
+    <option value="high" {% if f.min_confidence == 'high' %}selected{% endif %}>High only</option>
+  </select>
+  <input type="text" name="genre" value="{{ f.genre }}" placeholder="Genre" size="10">
+  <select name="sort">
+    <option value="level" {% if f.sort == 'level' %}selected{% endif %}>Closest to my size</option>
+    <option value="email" {% if f.sort == 'email' %}selected{% endif %}>Best email first</option>
+    <option value="newest" {% if f.sort == 'newest' %}selected{% endif %}>Newest</option>
+    <option value="updated" {% if f.sort == 'updated' %}selected{% endif %}>Recently updated</option>
+    <option value="biggest" {% if f.sort == 'biggest' %}selected{% endif %}>Biggest</option>
+    <option value="smallest" {% if f.sort == 'smallest' %}selected{% endif %}>Smallest</option>
+    <option value="name" {% if f.sort == 'name' %}selected{% endif %}>Name</option>
+  </select>
+  <label class="inline"><input type="checkbox" name="starred" value="1" {% if f.starred == '1' %}checked{% endif %}> Starred</label>
+  <button class="primary">Filter</button>
+  <a href="{{ url_for('leads', status='', level='') }}" class="small">Reset</a>
+</form>
+
+<form method="post" action="{{ url_for('bulk') }}" id="bulk">
+<input type="hidden" name="next" value="{{ request.full_path }}">
+<div class="panel" style="padding:0">
+<div class="table-wrap">
+<table>
+  <thead><tr>
+    <th><input type="checkbox" id="all"></th>
+    <th></th>
+    <th>Artist</th>
+    <th>Size vs you</th>
+    <th class="hide-sm">IG</th>
+    <th class="hide-sm">TikTok</th>
+    <th class="hide-sm">Spotify</th>
+    <th>Best email</th>
+    <th>Status</th>
+    <th class="hide-sm">Links</th>
+  </tr></thead>
+  <tbody>
+  {% for l in leads %}
+  <tr>
+    <td><input type="checkbox" name="ids" value="{{ l.id }}" class="pick"></td>
+    <td><button type="button" class="star {% if l.starred %}on{% endif %}" title="Star"
+         onclick="this.classList.toggle('on'); updateLead({{ l.id }}, {starred: this.classList.contains('on')})">★</button></td>
+    <td class="name">
+      <a href="{{ url_for('lead', lead_id=l.id, back=request.full_path) }}">{{ l.name }}</a>
+      <div class="sub">{{ l.genres or l.discovered_via }}{% if l.location %} · {{ l.location }}{% endif %}</div>
+    </td>
+    <td><span class="badge lvl-{{ l.level_bucket }}">{{ l.level_ratio|ratio }}{% if l.level_bucket != 'unknown' %} · {{ {'match': 'your level', 'bigger': 'bigger', 'smaller': 'smaller'}[l.level_bucket] }}{% endif %}</span></td>
+    <td class="hide-sm">{{ l.metrics.get('instagram_followers')|compact }}</td>
+    <td class="hide-sm">{{ l.metrics.get('tiktok_followers')|compact }}</td>
+    <td class="hide-sm">{{ l.metrics.get('spotify_followers')|compact }}</td>
+    <td>
+      {% if l.best_email %}
+        <span class="email">{{ l.best_email }}</span>
+        <span class="badge conf-{{ l.best_confidence }}">{{ l.best_confidence }}</span>
+        <button type="button" class="copy" onclick="copyText(this, '{{ l.best_email }}')">Copy</button>
+      {% else %}<span class="muted small">none yet</span>{% endif %}
+    </td>
+    <td>
+      <select class="status st-{{ l.status }}" onchange="this.className='status st-'+this.value; updateLead({{ l.id }}, {status: this.value})">
+        {% for s in STATUSES %}<option value="{{ s }}" {% if l.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}
+      </select>
+    </td>
+    <td class="links hide-sm">
+      {% if l.instagram %}<a href="https://www.instagram.com/{{ l.instagram }}/" target="_blank" rel="noopener">IG</a>{% endif %}
+      {% if l.tiktok %}<a href="https://www.tiktok.com/@{{ l.tiktok }}" target="_blank" rel="noopener">TT</a>{% endif %}
+      {% if l.spotify_url %}<a href="{{ l.spotify_url }}" target="_blank" rel="noopener">SP</a>{% endif %}
+      {% if l.website %}<a href="{{ l.website }}" target="_blank" rel="noopener">Web</a>{% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="10" class="muted" style="padding:30px;text-align:center">
+    No artists match. <a href="{{ url_for('find') }}">Find some artists</a>{% if f.level %} or set the size filter to "Any size"{% endif %}.
+  </td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+<div class="bulkbar" id="bulkbar"><div class="panel">
+  <span id="nsel">0</span> selected
+  <select name="action">
+    {% for s in STATUSES %}<option value="{{ s }}">Mark: {{ STATUS_LABELS[s] }}</option>{% endfor %}
+    <option value="recheck">Re-check emails</option>
+    <option value="delete">Delete</option>
+  </select>
+  <button class="primary">Apply</button>
+</div></div>
+</form>
+
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a class="btn" href="{{ url_for('leads', page=page-1, **args) }}">← Prev</a>{% endif %}
+  <span class="muted">Page {{ page }} of {{ pages }} · {{ total }} artists</span>
+  {% if page < pages %}<a class="btn" href="{{ url_for('leads', page=page+1, **args) }}">Next →</a>{% endif %}
+</div>
+{% else %}
+<p class="muted small" style="text-align:center">{{ total }} artist{{ '' if total == 1 else 's' }} shown</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+const picks = [...document.querySelectorAll('.pick')];
+function syncBulk() {
+  const n = picks.filter(p => p.checked).length;
+  document.getElementById('nsel').textContent = n;
+  document.getElementById('bulkbar').classList.toggle('on', n > 0);
+}
+picks.forEach(p => p.addEventListener('change', syncBulk));
+document.getElementById('all').addEventListener('change', e => { picks.forEach(p => p.checked = e.target.checked); syncBulk(); });
+document.getElementById('bulk').addEventListener('submit', e => {
+  if (e.target.action.value === 'delete' && !confirm('Delete the selected artists?')) e.preventDefault();
+});
+window.reloadWhenJobsFinish = true;
+</script>
+{% endblock %}

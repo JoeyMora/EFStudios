@@ -13,7 +13,7 @@ import re
 from urllib.parse import urlparse
 
 from ..extract import context_for, emails_from_text
-from ..http import HttpClient
+from ..net import HttpClient
 from ..models import Finding
 from ..scoring import name_similarity
 
@@ -38,7 +38,7 @@ class YouTube:
         if "youtube.com" not in parsed.netloc and "youtu.be" not in parsed.netloc:
             return None
         path = parsed.path.rstrip("/")
-        params: dict = {"part": "snippet,contentDetails"}
+        params: dict = {"part": "snippet,contentDetails,statistics"}
         if m := re.match(r"^/channel/(UC[\w-]+)", path):
             params["id"] = m.group(1)
         elif m := re.match(r"^/@([\w.\-]+)", path):
@@ -50,7 +50,7 @@ class YouTube:
         data = self._get("channels", **params)
         items = (data or {}).get("items") or []
         if not items and "forUsername" in params:  # /c/ custom URLs are often handles now
-            data = self._get("channels", part="snippet,contentDetails",
+            data = self._get("channels", part="snippet,contentDetails,statistics",
                              forHandle="@" + params["forUsername"])
             items = (data or {}).get("items") or []
         return items[0] if items else None
@@ -66,12 +66,13 @@ class YouTube:
                 best, best_sim = item, sim
         if not best or best_sim < 0.85:
             return None
-        data = self._get("channels", part="snippet,contentDetails",
+        data = self._get("channels", part="snippet,contentDetails,statistics",
                          id=best["snippet"]["channelId"])
         items = (data or {}).get("items") or []
         return items[0] if items else None
 
-    def find(self, artist_name: str, links: list[str]) -> tuple[list[Finding], list[str]]:
+    def find(self, artist_name: str, links: list[str]) -> tuple[list[Finding], dict]:
+        """(findings, info) where info has "url" and "subscribers"."""
         channel = None
         for link in links:
             channel = self.channel_from_url(link)
@@ -80,7 +81,7 @@ class YouTube:
         if channel is None and self.allow_search:
             channel = self.search_channel(artist_name)
         if channel is None:
-            return [], []
+            return [], {}
 
         channel_url = f"https://www.youtube.com/channel/{channel['id']}"
         findings: list[Finding] = []
@@ -99,4 +100,6 @@ class YouTube:
                 text = snippet.get("description", "")
                 for email in emails_from_text(text):
                     findings.append(Finding(email, "youtube", video_url, context_for(email, text)))
-        return findings, [channel_url]
+        stats = channel.get("statistics") or {}
+        subs = None if stats.get("hiddenSubscriberCount") else stats.get("subscriberCount")
+        return findings, {"url": channel_url, "subscribers": int(subs) if subs else None}

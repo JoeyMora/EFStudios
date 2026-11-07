@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 *.csv
 !examples/*.csv
+*.db
+*.db-wal
+*.db-shm

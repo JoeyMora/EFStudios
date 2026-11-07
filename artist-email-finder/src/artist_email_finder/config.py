@@ -29,6 +29,10 @@ class Settings:
     youtube_api_key: str = ""
     brave_api_key: str = ""
     serpapi_api_key: str = ""
+    lastfm_api_key: str = ""
+    meta_access_token: str = ""
+    ig_user_id: str = ""
+    graph_api_version: str = "v24.0"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -38,11 +42,29 @@ class Settings:
             youtube_api_key=os.environ.get("YOUTUBE_API_KEY", ""),
             brave_api_key=os.environ.get("BRAVE_API_KEY", ""),
             serpapi_api_key=os.environ.get("SERPAPI_API_KEY", ""),
+            lastfm_api_key=os.environ.get("LASTFM_API_KEY", ""),
+            meta_access_token=os.environ.get("META_ACCESS_TOKEN", ""),
+            ig_user_id=os.environ.get("IG_USER_ID", ""),
+            graph_api_version=os.environ.get("GRAPH_API_VERSION", "v24.0"),
         )
 
     @property
     def has_spotify(self) -> bool:
         return bool(self.spotify_client_id and self.spotify_client_secret)
+
+    @property
+    def has_instagram(self) -> bool:
+        return bool(self.meta_access_token and self.ig_user_id)
+
+    def status(self) -> dict[str, bool]:
+        """Which optional sources are configured (for the UI; never the values)."""
+        return {
+            "Spotify (discovery, followers)": self.has_spotify,
+            "Last.fm (discovery, listeners)": bool(self.lastfm_api_key),
+            "Instagram Business Discovery": self.has_instagram,
+            "YouTube": bool(self.youtube_api_key),
+            "Web search (Brave/SerpAPI)": self.has_web_search,
+        }
 
     @property
     def has_web_search(self) -> bool:

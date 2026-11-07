@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from ..extract import context_for, emails_from_html
-from ..http import HttpClient
+from ..net import HttpClient
 from ..models import Finding
 
 log = logging.getLogger(__name__)

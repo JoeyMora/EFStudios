@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}{{ lead.name }}{% endblock %}
+{% block content %}
+<p><a href="{{ back or url_for('leads') }}">← Back to leads</a></p>
+<div class="row">
+  <button type="button" class="star {% if lead.starred %}on{% endif %}" style="font-size:22px"
+     onclick="this.classList.toggle('on'); updateLead({{ lead.id }}, {starred: this.classList.contains('on')})">★</button>
+  <h1>{{ lead.name }}</h1>
+  <span class="badge lvl-{{ lead.level_bucket }}">{{ lead.level_ratio|ratio }} your size{% if lead.level_bucket == 'match' %} · your level{% elif lead.level_bucket in ('bigger','smaller') %} · {{ lead.level_bucket }}{% endif %}</span>
+  <span class="spacer"></span>
+  <select class="status st-{{ lead.status }}" onchange="this.className='status st-'+this.value; updateLead({{ lead.id }}, {status: this.value})">
+    {% for s in STATUSES %}<option value="{{ s }}" {% if lead.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}
+  </select>
+  <form method="post" action="{{ url_for('recheck', lead_id=lead.id) }}"><button>Re-check emails</button></form>
+</div>
+<p class="muted">{{ lead.genres }}{% if lead.location %} · {{ lead.location }}{% endif %} · found via {{ lead.discovered_via or 'input' }}</p>
+{% if request.args.get('checking') %}<div class="notice">Re-checking in the background. This page reloads when it's done.</div>{% endif %}
+
+<div class="grid2">
+<div>
+  <div class="panel">
+    <h2>Emails</h2>
+    {% if lead.emails %}
+    <table>
+      {% for e in lead.emails %}
+      <tr>
+        <td>
+          <div><span class="email">{{ e.email }}</span> <span class="badge conf-{{ e.confidence }}">{{ e.confidence }} · {{ e.score }}</span></div>
+          <div class="small muted">from {{ e.sources }}{% if e.context %}: “{{ e.context }}”{% endif %}</div>
+          <div class="small">{% for u in e.urls.split(' ') if u %}<a href="{{ u }}" target="_blank" rel="noopener">{{ u[:70] }}</a><br>{% endfor %}</div>
+        </td>
+        <td style="white-space:nowrap;text-align:right">
+          <button type="button" class="copy" onclick="copyText(this, '{{ e.email }}')">Copy</button>
+          <a class="btn copy" href="{{ mailto[e.id] }}">Email</a>
+          <form method="post" action="{{ url_for('delete_email', lead_id=lead.id, email_id=e.id) }}" style="display:inline">
+            <button class="copy danger" title="Remove this email">✕</button></form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p class="small muted">"Email" opens your mail app with your template (edit it in Settings).</p>
+    {% else %}
+    <p class="muted">No email found yet. Try one of these:</p>
+    <ul class="small">
+      <li>Open their {% if lead.instagram %}<a href="https://www.instagram.com/{{ lead.instagram }}/" target="_blank" rel="noopener">Instagram</a>{% else %}Instagram{% endif %}
+        or {% if lead.tiktok %}<a href="https://www.tiktok.com/@{{ lead.tiktok }}" target="_blank" rel="noopener">TikTok</a>{% else %}TikTok{% endif %}
+        and click the <b>Capture</b> bookmarklet, or paste the bio below.</li>
+      <li>Add their Instagram/TikTok handle or website below, then <b>Re-check emails</b>.</li>
+      <li>On the Instagram app, business profiles have an <b>Email</b> button: add what you see below.</li>
+    </ul>
+    {% endif %}
+    <form method="post" action="{{ url_for('add_email', lead_id=lead.id) }}" class="row" style="margin-top:10px">
+      <input type="text" name="email" placeholder="Add an email you found" style="flex:1">
+      <button>Add</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Paste a bio</h2>
+    <p class="small muted">Copy the bio from their profile (in the app or browser) and paste it here. Emails and follower counts are picked out automatically.</p>
+    <form method="post" action="{{ url_for('paste_bio', lead_id=lead.id) }}">
+      <textarea name="text" placeholder="e.g. 12.4K followers · Atlanta 🎤 booking: mgmt@artist.com"></textarea>
+      <div class="row" style="margin-top:8px">
+        <select name="platform"><option value="instagram">From Instagram</option><option value="tiktok">From TikTok</option></select>
+        <button class="primary">Extract</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Notes</h2>
+    <form method="post" action="{{ url_for('update_lead', lead_id=lead.id) }}">
+      <input type="hidden" name="back" value="{{ back }}">
+      <textarea name="notes" placeholder="Track, vibe, what to pitch, when you reached out...">{{ lead.notes }}</textarea>
+      <div style="margin-top:8px"><button class="primary">Save notes</button></div>
+    </form>
+  </div>
+</div>
+
+<div>
+  <div class="panel">
+    <h2>Size</h2>
+    <form method="post" action="{{ url_for('update_lead', lead_id=lead.id) }}">
+      <input type="hidden" name="back" value="{{ back }}">
+      <div class="metric-grid">
+        {% for key, label in METRICS.items() %}
+        <div class="metric">
+          <div class="v">{{ lead.metrics.get(key)|compact or '–' }}</div>
+          <div class="k">{{ label }}{% if my.get(key) %} · you: {{ my[key]|compact }}{% endif %}</div>
+          <input type="text" name="{{ key }}" placeholder="set manually">
+        </div>
+        {% endfor %}
+      </div>
+      <div style="margin-top:8px"><button>Save numbers</button></div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Profiles &amp; links</h2>
+    <form method="post" action="{{ url_for('update_lead', lead_id=lead.id) }}">
+      <input type="hidden" name="back" value="{{ back }}">
+      <label>Instagram handle</label><input type="text" name="instagram" value="{{ lead.instagram }}" style="width:100%">
+      <label>TikTok handle</label><input type="text" name="tiktok" value="{{ lead.tiktok }}" style="width:100%">
+      <label>Website / link page</label><input type="text" name="website" value="{{ lead.website }}" style="width:100%">
+      <div style="margin-top:8px"><button>Save</button> <span class="small muted">then Re-check emails</span></div>
+    </form>
+    <div class="small" style="margin-top:12px">
+      {% if lead.spotify_url %}<a href="{{ lead.spotify_url }}" target="_blank" rel="noopener">Spotify</a><br>{% endif %}
+      {% for l in lead.links %}<a href="{{ l }}" target="_blank" rel="noopener">{{ l[:80] }}</a><br>{% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <form method="post" action="{{ url_for('delete_lead', lead_id=lead.id) }}" onsubmit='return confirm({{ ("Delete " ~ lead.name ~ "?")|tojson }})'>
+      <input type="hidden" name="back" value="{{ back }}">
+      <button class="danger">Delete this artist</button>
+    </form>
+  </div>
+</div>
+</div>
+{% endblock %}
+{% block scripts %}<script>window.reloadWhenJobsFinish = true;</script>{% endblock %}
