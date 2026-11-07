@@ -5,7 +5,12 @@ Finds artists at your engagement level to reach out to, along with their public 
 - **Find artists:** by genre (Spotify, Last.fm, MusicBrainz), by city (MusicBrainz), or "similar to" an artist you name (Last.fm). You can also paste a list of artists you already know.
 - **"Around my level", based on engagement:** enter how much engagement your typical post gets. Every artist's typical post is compared with yours (for example, `1.8×`), and discovery keeps only artists in your range. Follower counts are shown for context but never used for level.
 - **Find emails:** from their website, Linktree-style pages, Instagram and TikTok (see below), YouTube descriptions and web search. Each email gets a confidence rating.
-- **Work through leads:** filter and sort, star artists, set a status (New → Shortlist → Contacted → Replied / Not a fit), keep notes, copy an email, open a pre-filled email from your template, and export to CSV.
+- **Work through leads visually:**
+  - **Cards** with artist photos, a level meter and per-platform engagement meters.
+  - **"Where your leads sit" map:** engagement compared with yours, against email confidence. The best targets sit top-middle.
+  - **Pipeline overview**, plus a **Board** where you drag artists between New → Shortlist → Contacted → Replied / Not a fit.
+  - A **List** view for bulk actions.
+  - Notes, copy an email, open a pre-filled email from your template, and export to CSV.
 
 ## Quick start
 
@@ -29,7 +34,7 @@ Instagram and TikTok block automated access to profile pages, and getting around
 
 1. **Instagram Business Discovery (official Meta API).** Your Instagram business or creator account can look up any other business or creator account's bio, website link, follower count and like/comment counts on recent posts. Most artists who take bookings use one of those account types. The bio's website, usually a Linktree, is then checked for an email. The API doesn't expose the in-app "Email" button, and it doesn't work for personal accounts.
 2. **Search-engine snippets.** Google and Brave index public Instagram and TikTok profiles. The tool reads the snippet ("12K Followers … bookings: …") to get follower counts, bio emails and handles. This needs a Brave or SerpAPI key.
-3. **Capture bookmarklet (you browse, it reads).** Drag **Capture artist** from the Settings page to your bookmarks bar. While you're on an artist's Instagram or TikTok profile, click it. Their bio email, follower count and (on TikTok) typical views per video are saved to your leads. Any Linktree or website in their bio is then checked automatically. It only reads the page you're already looking at. It also works on Linktree pages and websites.
+3. **Capture bookmarklet (you browse, it reads).** Drag **Capture artist** from the Settings page to your bookmarks bar. While you're on an artist's Instagram **Reels tab** or TikTok profile, click it. Their bio email, follower count, photo and typical views per reel or video are saved to your leads. Any Linktree or website in their bio is then checked automatically. It only reads the page you're already looking at. It also works on Linktree pages and websites.
 
 You can also paste a bio into an artist's page (**Paste a bio**), or add an email you saw in the Instagram app's Email button by hand.
 
@@ -48,7 +53,7 @@ The limit is about 200 lookups per hour. When the token expires, lookups quietly
 
 | Key | Unlocks | Where |
 |---|---|---|
-| `META_ACCESS_TOKEN`, `IG_USER_ID` | Instagram engagement (likes + comments per post), bio, website, followers | see above |
+| `META_ACCESS_TOKEN`, `IG_USER_ID` | Instagram reel likes + comments, bio, website, followers, profile photo | see above |
 | `BRAVE_API_KEY` or `SERPAPI_API_KEY` | Web search for emails, plus Instagram/TikTok profile snippets | brave.com/search/api, serpapi.com |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | Discover by genre, Spotify followers | developer.spotify.com/dashboard |
 | `LASTFM_API_KEY` | Discover by tag or "similar to", listener counts | last.fm/api/account/create |
@@ -64,15 +69,16 @@ Level is based on how many people actually engage with a typical post, not on fo
 
 | Platform | Engagement measured | Where it comes from |
 |---|---|---|
-| Instagram | Median likes + comments per post, over the last 12 posts | Official API (Meta keys), or typed in by hand |
+| Instagram | Median **views per reel**, recent reels with pinned ones skipped | Capture bookmarklet on their **Reels tab** (instagram.com/name/reels) |
+| Instagram | Median **likes + comments per reel**, over the last 12 reels | Official API (Meta keys) |
 | TikTok | Median views per video, recent videos with pinned ones skipped | Capture bookmarklet on their profile, or typed in by hand |
 | YouTube | Median views per video, over the last 10 uploads | YouTube API key |
 
-Medians keep one viral post from skewing the number. Each platform is compared only with the same platform: their Instagram against your Instagram, their TikTok views against your TikTok views. The ratios are then averaged (a geometric mean). By default, 0.25× to 4× your engagement counts as "your level"; you can change the range in Settings.
+Medians keep one viral post from skewing the number. Instagram is measured on reels only; photo and carousel posts are ignored. Each number is compared only with the same number of yours. The comparisons are averaged within a platform first, so Instagram counts once even when both reel numbers are known. Then the platforms are averaged (a geometric mean). By default, 0.25× to 4× your engagement counts as "your level"; you can change the range in Settings.
 
 **Setting your own level:**
 
-- **Instagram:** Settings → "Fill in my engagement automatically" with your handle (needs Meta keys).
+- **Instagram:** open your own Reels tab, click **Capture artist**, then **This is me**. That sets views per reel. Settings → "Fill in my engagement automatically" sets likes + comments per reel (needs Meta keys).
 - **YouTube:** paste your channel link there (needs a YouTube key).
 - **TikTok:** open your own profile, click **Capture artist**, then **This is me**.
 - **Anything else:** type the numbers in.

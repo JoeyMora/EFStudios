@@ -87,7 +87,11 @@ def test_web_pages(tmp_path):
                               "email_subject": "Hi {artist}", "email_body": "Yo {first_name}"})
     assert store.my_metrics() == {"instagram_reel_engagement": 300}
     assert store.lead(lead_id)["level_bucket"] == "match"
-    assert "8.1%" in c.get("/?level=").data.decode()   # 250 / 3,100 followers
+    assert "8.1%" in c.get(f"/lead/{lead_id}").data.decode()   # 250 / 3,100 followers
+    for view in ("cards", "board", "list"):
+        page = c.get(f"/?view={view}&level=").data.decode()
+        assert "Lil Nova" in page and "Where your leads sit" in page, view
+    assert 'class="mini" draggable="true"' in c.get("/?view=board").data.decode()
     page = c.get(f"/lead/{lead_id}").data.decode()
     assert "mailto:nova@mgmt.co?subject=Hi%20Lil%20Nova&amp;body=Yo%20Lil" in page
 
@@ -168,3 +172,20 @@ def test_instagram_counts_once_per_platform():
     theirs = {"instagram_reel_views": 4000, "instagram_reel_engagement": 400, "tiktok_views": 1000}
     # Instagram 4x (both IG metrics agree), TikTok 1x -> sqrt(4 * 1) = 2x, not (4*4*1)^(1/3)
     assert round(ratio(theirs, mine), 6) == 2.0
+
+
+def test_map_points_and_meters(tmp_path):
+    import json, re
+    app = create_app(str(tmp_path / "leads.db"), Settings(), start_jobs=False)
+    store, c = app.config["store"], app.test_client()
+    store.save_settings({"my_tiktok_views": "1000"})
+    store.save_artist(Artist(name="Peer", metrics={"tiktok_views": 2000}, image_url="https://i.scdn.co/x.jpg"))
+    store.save_artist(Artist(name="Star", metrics={"tiktok_views": 500_000}))
+    store.save_artist(Artist(name="Mystery"))
+    page = c.get("/?level=").data.decode()
+    points = json.loads(re.search(r'<script id="points" type="application/json">(.*?)</script>', page, re.S).group(1))
+    assert {p["name"]: p["bucket"] for p in points} == {"Peer": "match", "Star": "bigger"}
+    assert "1 artist with unknown engagement not shown" in page
+    assert 'src="https://i.scdn.co/x.jpg"' in page
+    # Peer at 2x sits right of center on the 1/32x..32x meter: (log 2 / log 32 + 1) / 2 = 60%
+    assert "left:60.0%" in page

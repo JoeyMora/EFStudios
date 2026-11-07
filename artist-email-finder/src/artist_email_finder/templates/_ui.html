@@ -1,0 +1,52 @@
+{# Shared UI pieces. Import with: {% import "_ui.html" as ui %} #}
+
+{% macro icon(name, cls="") %}<svg class="icon {{ cls }}" aria-hidden="true"><use href="#i-{{ name }}"/></svg>{% endmacro %}
+
+{% macro avatar(lead, size="") %}
+  {%- set initials = (lead.name.split()[:2]|map('first')|join)|upper -%}
+  {%- if lead.image_url -%}
+  <img class="avatar {{ size }}" src="{{ lead.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+       onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-flex'">
+  <span class="avatar initials {{ size }}" aria-hidden="true" style="display:none">{{ initials }}</span>
+  {%- else -%}
+  <span class="avatar initials {{ size }}" aria-hidden="true">{{ initials }}</span>
+  {%- endif -%}
+{% endmacro %}
+
+{# A level meter: log scale from 1/32x to 32x my engagement; shaded = my range; tick = me. #}
+{% macro meter(r, bucket, size="", scale=False) %}
+<div class="meter {{ size }}" role="img" aria-label="{{ (r|ratio) ~ ' your engagement' if r is not none else 'engagement unknown' }}">
+  <div class="track"></div>
+  <div class="bandz" style="left:{{ band_l }}%;width:{{ band_h - band_l }}%"></div>
+  <div class="youtick" title="you"></div>
+  {% if r is not none %}<div class="dot {{ 'out' if bucket in ('bigger', 'smaller') }}" style="left:{{ r|meterpos }}%"></div>{% endif %}
+</div>
+{% if scale %}<div class="meter-scale">{% for r, t in [(1/32, '1/32×'), (0.25, '¼×'), (1, 'you'), (4, '4×'), (32, '32×')] %}<span style="left:{{ r|meterpos }}%">{{ t }}</span>{% endfor %}</div>{% endif %}
+{% endmacro %}
+
+{% macro level_text(lead) %}
+  {%- if lead.level_ratio is none -%}<span class="muted">Engagement unknown</span>
+  {%- else -%}<b>{{ lead.level_ratio|ratio }}</b> your engagement · {{ {'match': 'your level', 'bigger': 'bigger', 'smaller': 'smaller'}[lead.level_bucket] }}
+  {%- endif -%}
+{% endmacro %}
+
+{% macro links(lead) %}
+<div class="iconlinks">
+  {% if lead.instagram %}<a href="https://www.instagram.com/{{ lead.instagram }}/reels/" target="_blank" rel="noopener" title="Instagram reels">{{ icon('instagram') }}</a>{% endif %}
+  {% if lead.tiktok %}<a href="https://www.tiktok.com/@{{ lead.tiktok }}" target="_blank" rel="noopener" title="TikTok">{{ icon('tiktok') }}</a>{% endif %}
+  {% for l in lead.links if 'youtube.com' in l %}{% if loop.first %}<a href="{{ l }}" target="_blank" rel="noopener" title="YouTube">{{ icon('youtube') }}</a>{% endif %}{% endfor %}
+  {% if lead.spotify_url %}<a href="{{ lead.spotify_url }}" target="_blank" rel="noopener" title="Spotify">{{ icon('spotify') }}</a>{% endif %}
+  {% if lead.website %}<a href="{{ lead.website }}" target="_blank" rel="noopener" title="Website / link page">{{ icon('web') }}</a>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro status_select(lead) %}
+<select class="status st-{{ lead.status }}" aria-label="Status" onchange="this.className='status st-'+this.value; updateLead({{ lead.id }}, {status: this.value})">
+  {% for s in STATUSES %}<option value="{{ s }}" {% if lead.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}
+</select>
+{% endmacro %}
+
+{% macro star(lead, style="") %}
+<button type="button" class="star {% if lead.starred %}on{% endif %}" title="Star" style="{{ style }}"
+  onclick="this.classList.toggle('on'); updateLead({{ lead.id }}, {starred: this.classList.contains('on')})">★</button>
+{% endmacro %}

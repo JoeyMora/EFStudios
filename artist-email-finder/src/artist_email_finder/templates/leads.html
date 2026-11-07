@@ -1,32 +1,91 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
 {% block title %}Leads{% endblock %}
 {% block content %}
-<div class="row">
+{% set stage_colors = {'new': 'var(--stage-1)', 'shortlist': 'var(--stage-2)', 'contacted': 'var(--stage-3)', 'replied': 'var(--stage-4)', 'not_a_fit': 'var(--stage-off)'} %}
+<div class="row" style="margin-bottom:14px">
   <h1>Leads</h1>
   <span class="spacer"></span>
+  <div class="seg" role="tablist" aria-label="View">
+    <a class="{{ 'on' if view == 'cards' }}" href="{{ url_for('leads', view='cards', **args) }}">{{ ui.icon('cards') }} Cards</a>
+    <a class="{{ 'on' if view == 'board' }}" href="{{ url_for('leads', view='board', **args) }}">{{ ui.icon('board') }} Board</a>
+    <a class="{{ 'on' if view == 'list' }}" href="{{ url_for('leads', view='list', **args) }}">{{ ui.icon('list') }} List</a>
+  </div>
   <a class="btn" href="{{ export_url }}">Export CSV</a>
   <a class="btn primary" href="{{ url_for('find') }}">+ Find artists</a>
 </div>
-<div class="stats muted">
-  <span><b>{{ counts.all }}</b> artists</span>
-  <span><b>{{ counts.with_email }}</b> with email</span>
-  <span><b>{{ counts.get('shortlist', 0) }}</b> shortlisted</span>
-  <span><b>{{ counts.get('contacted', 0) }}</b> contacted</span>
-  <span><b>{{ counts.get('replied', 0) }}</b> replied</span>
-</div>
 
 {% if not has_level %}
-<div class="notice">Set your engagement in <a href="{{ url_for('settings_page') }}">My level</a> to see which artists are around your level.</div>
+<div class="notice">Set your engagement in <a href="{{ url_for('settings_page') }}">My level</a> to see which artists are at your level.</div>
 {% endif %}
 
+<div class="overview">
+  <div class="panel">
+    <div class="kpis">
+      <div class="kpi"><div class="v">{{ counts.all }}</div><div class="k">artists</div></div>
+      <div class="kpi"><div class="v">{{ counts.get('level_match', 0) }}</div><div class="k">at your level</div></div>
+      <div class="kpi"><div class="v">{{ counts.with_email }}</div><div class="k">with an email</div></div>
+    </div>
+    <h2>Pipeline</h2>
+    {% set total_all = counts.all or 1 %}
+    <div class="segbar" role="img" aria-label="Pipeline: {% for s in STATUSES %}{{ STATUS_LABELS[s] }} {{ counts.get(s, 0) }}{{ ', ' if not loop.last }}{% endfor %}">
+      {% for s in STATUSES if counts.get(s, 0) %}
+      <span style="flex:{{ counts.get(s, 0) }};background:{{ stage_colors[s] }}" title="{{ STATUS_LABELS[s] }}: {{ counts.get(s, 0) }}"></span>
+      {% else %}<span style="flex:1;background:var(--track)"></span>{% endfor %}
+    </div>
+    <div class="stages">
+      {% for s in STATUSES %}
+      <a class="stage {{ 'on' if f.status == s }}" href="{{ url_for('leads', **dict(args, status=('' if f.status == s else s), view=view)) }}">
+        <div class="n">{{ counts.get(s, 0) }}</div>
+        <div class="l"><span class="swatch" style="background:{{ stage_colors[s] }}"></span>{{ STATUS_LABELS[s] }}</div>
+      </a>
+      {% endfor %}
+    </div>
+
+    <h2 style="margin-top:18px">Engagement vs you</h2>
+    {% set lv = [('smaller', 'Smaller', 'var(--muted-mark)'), ('match', 'Your level', 'var(--series-1)'), ('bigger', 'Bigger', 'var(--muted-mark)'), ('unknown', 'Unknown', 'var(--track)')] %}
+    <div class="segbar" role="img" aria-label="{% for k, label, c in lv %}{{ label }} {{ counts.get('level_' ~ k, 0) }}{{ ', ' if not loop.last }}{% endfor %}">
+      {% for k, label, c in lv if counts.get('level_' ~ k, 0) %}<span style="flex:{{ counts.get('level_' ~ k) }};background:{{ c }}" title="{{ label }}: {{ counts.get('level_' ~ k) }}"></span>{% else %}<span style="flex:1;background:var(--track)"></span>{% endfor %}
+    </div>
+    <div class="stages" style="grid-template-columns:repeat(4,1fr)">
+      {% for k, label, c in lv %}
+      <a class="stage {{ 'on' if f.level == k }}" href="{{ url_for('leads', **dict(args, level=('' if f.level == k else k), view=view)) }}">
+        <div class="n">{{ counts.get('level_' ~ k, 0) }}</div>
+        <div class="l"><span class="swatch" style="background:{{ c }}"></span>{{ label }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="chart-head">
+      <h2>Where your leads sit</h2>
+      <div class="legend">
+        <span><i style="background:var(--series-1)"></i>your level</span>
+        <span><i style="background:var(--muted-mark)"></i>bigger / smaller</span>
+        <span><i class="band"></i>your range ({{ band_low|ratio }}–{{ band_high|ratio }})</span>
+      </div>
+    </div>
+    {% if points %}
+    <svg id="map" role="img" aria-label="Scatter of {{ points|length }} artists: engagement compared with yours (left to right) against email confidence (bottom to top)"></svg>
+    <p class="small muted" style="margin:4px 0 0">Best targets sit in the shaded band, toward the top (a confident email). Click a dot to open the artist.{% if unknown %} {{ unknown }} artist{{ '' if unknown == 1 else 's' }} with unknown engagement not shown.{% endif %}</p>
+    {% else %}
+    <div class="nodata" style="margin-top:12px">Nothing to plot yet. Artists appear here once their engagement is known{% if not has_level %} and you've set your own in My level{% endif %}.</div>
+    {% endif %}
+  </div>
+</div>
+
 <form class="panel filters" method="get">
+  <input type="hidden" name="view" value="{{ view }}">
   <input type="search" name="q" value="{{ f.q }}" placeholder="Search name, email, handle, notes">
-  <select name="status">
+  {% if view != 'board' %}
+  <select name="status" aria-label="Status">
     <option value="active" {% if f.status == 'active' %}selected{% endif %}>All except "not a fit"</option>
     <option value="" {% if f.status == '' %}selected{% endif %}>Any status</option>
     {% for s in STATUSES %}<option value="{{ s }}" {% if f.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}
   </select>
-  <select name="level">
+  {% endif %}
+  <select name="level" aria-label="Level">
     <option value="" {% if f.level == '' %}selected{% endif %}>Any level</option>
     <option value="match+unknown" {% if f.level == 'match+unknown' %}selected{% endif %}>My level + unknown</option>
     <option value="match" {% if f.level == 'match' %}selected{% endif %}>My level</option>
@@ -34,18 +93,18 @@
     <option value="smaller" {% if f.level == 'smaller' %}selected{% endif %}>Smaller than my range</option>
     <option value="unknown" {% if f.level == 'unknown' %}selected{% endif %}>Engagement unknown</option>
   </select>
-  <select name="has_email">
+  <select name="has_email" aria-label="Email">
     <option value="">Email: any</option>
     <option value="yes" {% if f.has_email == 'yes' %}selected{% endif %}>Has email</option>
     <option value="no" {% if f.has_email == 'no' %}selected{% endif %}>No email yet</option>
   </select>
-  <select name="min_confidence">
+  <select name="min_confidence" aria-label="Confidence">
     <option value="">Any confidence</option>
     <option value="medium" {% if f.min_confidence == 'medium' %}selected{% endif %}>Medium+</option>
     <option value="high" {% if f.min_confidence == 'high' %}selected{% endif %}>High only</option>
   </select>
   <input type="text" name="genre" value="{{ f.genre }}" placeholder="Genre" size="10">
-  <select name="sort">
+  <select name="sort" aria-label="Sort">
     <option value="level" {% if f.sort == 'level' %}selected{% endif %}>Closest to my engagement</option>
     <option value="email" {% if f.sort == 'email' %}selected{% endif %}>Best email first</option>
     <option value="newest" {% if f.sort == 'newest' %}selected{% endif %}>Newest</option>
@@ -56,20 +115,107 @@
   </select>
   <label class="inline"><input type="checkbox" name="starred" value="1" {% if f.starred == '1' %}checked{% endif %}> Starred</label>
   <button class="primary">Filter</button>
-  <a href="{{ url_for('leads', status='', level='') }}" class="small">Reset</a>
+  <a href="{{ url_for('leads', status='', level='', view=view) }}" class="small">Reset</a>
 </form>
 
+{% if view == 'cards' %}
+{# ---------------------------------------------------------------- cards #}
+<div class="cards">
+  {% for l in leads %}
+  {% set rows = platform_rows(l.metrics) %}
+  <div class="card {{ 'dim' if l.status == 'not_a_fit' }}">
+    <div class="card-top">
+      {{ ui.avatar(l) }}
+      <div class="who">
+        <a class="nm" href="{{ url_for('lead', lead_id=l.id, back=request.full_path) }}">{{ l.name }}</a>
+        <div class="sub">{{ l.genres or l.discovered_via }}{% if l.location %} · {{ l.location }}{% endif %}</div>
+      </div>
+      {{ ui.star(l) }}
+    </div>
+
+    <div>
+      <div class="levelline"><span>{{ ui.level_text(l) }}</span></div>
+      {{ ui.meter(l.level_ratio, l.level_bucket) }}
+    </div>
+
+    {% if rows %}
+    <div style="display:flex;flex-direction:column;gap:8px">
+      {% for p in rows %}
+      <div class="prow" title="{{ p.label }}: {{ p.detail }}">
+        <span class="muted">{{ ui.icon(p.platform) }}</span>
+        <div>
+          <div class="pv"><span>{{ p.text }}</span><span>{{ p.ratio|ratio if p.ratio is not none else '' }}</span></div>
+          {% if p.ratio is not none %}{{ ui.meter(p.ratio, 'match' if band_low <= p.ratio <= band_high else 'bigger', 'sm') }}{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="nodata">No engagement numbers yet. Capture their Reels tab or TikTok, or open the artist to add them.</div>
+    {% endif %}
+
+    <div class="mailpill">
+      {% if l.best_email %}
+        <span class="dotc {{ l.best_confidence }}" title="{{ l.best_confidence }} confidence"></span>
+        <span class="email" title="{{ l.best_email }} ({{ l.best_confidence }} confidence)">{{ l.best_email }}</span>
+        <button type="button" class="copy" title="Copy email" onclick="copyText(this, '{{ l.best_email }}')">{{ ui.icon('copy') }}</button>
+      {% else %}
+        <span class="none">No email yet</span>
+      {% endif %}
+    </div>
+
+    <div class="card-foot">
+      {{ ui.status_select(l) }}
+      <span class="spacer"></span>
+      {{ ui.links(l) }}
+    </div>
+  </div>
+  {% else %}
+  <div class="panel muted" style="grid-column:1/-1;text-align:center;padding:40px">
+    No artists match. <a href="{{ url_for('find') }}">Find some artists</a>{% if f.level %} or set the level filter to "Any level"{% endif %}.
+  </div>
+  {% endfor %}
+</div>
+
+{% elif view == 'board' %}
+{# ---------------------------------------------------------------- board #}
+<p class="small muted">Drag artists between columns to update their status.</p>
+<div class="board">
+  {% for s in STATUSES %}
+  {% set col = leads|selectattr('status', 'equalto', s)|list %}
+  <div class="col" data-status="{{ s }}">
+    <h3><span class="swatch" style="background:{{ stage_colors[s] }}"></span>{{ STATUS_LABELS[s] }} <span class="n">{{ col|length }}</span></h3>
+    {% for l in col %}
+    <div class="mini" draggable="true" data-id="{{ l.id }}">
+      <div class="t">
+        {{ ui.avatar(l, 'sm') }}
+        <a href="{{ url_for('lead', lead_id=l.id, back=request.full_path) }}">{{ l.name }}</a>
+        {% if l.starred %}<span style="color:#f5b400">★</span>{% endif %}
+      </div>
+      {{ ui.meter(l.level_ratio, l.level_bucket, 'sm') }}
+      <div class="e">
+        {% if l.best_email %}<span class="dotc {{ l.best_confidence }}"></span><span class="email">{{ l.best_email }}</span>
+        {% else %}<span class="muted">No email yet</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+{# ---------------------------------------------------------------- list #}
 <form method="post" action="{{ url_for('bulk') }}" id="bulk">
 <input type="hidden" name="next" value="{{ request.full_path }}">
 <div class="panel" style="padding:0">
 <div class="table-wrap">
 <table>
   <thead><tr>
-    <th><input type="checkbox" id="all"></th>
+    <th><input type="checkbox" id="all" aria-label="Select all"></th>
     <th></th>
     <th>Artist</th>
-    <th>Engagement vs you</th>
-    <th class="hide-sm" title="Median likes + comments per post (engagement rate)">IG / post</th>
+    <th style="min-width:160px">Engagement vs you</th>
+    <th class="hide-sm" title="Median views per reel">IG / reel</th>
     <th class="hide-sm" title="Median views per video">TikTok / video</th>
     <th class="hide-sm" title="Median views per video">YouTube / video</th>
     <th>Best email</th>
@@ -79,39 +225,30 @@
   <tbody>
   {% for l in leads %}
   <tr>
-    <td><input type="checkbox" name="ids" value="{{ l.id }}" class="pick"></td>
-    <td><button type="button" class="star {% if l.starred %}on{% endif %}" title="Star"
-         onclick="this.classList.toggle('on'); updateLead({{ l.id }}, {starred: this.classList.contains('on')})">★</button></td>
+    <td><input type="checkbox" name="ids" value="{{ l.id }}" class="pick" aria-label="Select {{ l.name }}"></td>
+    <td>{{ ui.star(l) }}</td>
     <td class="name">
+      <div class="row" style="flex-wrap:nowrap">{{ ui.avatar(l, 'sm') }}<div>
       <a href="{{ url_for('lead', lead_id=l.id, back=request.full_path) }}">{{ l.name }}</a>
-      <div class="sub">{{ l.genres or l.discovered_via }}{% if l.location %} · {{ l.location }}{% endif %}</div>
+      <div class="sub">{{ l.genres or l.discovered_via }}{% if l.location %} · {{ l.location }}{% endif %}</div></div></div>
     </td>
-    <td><span class="badge lvl-{{ l.level_bucket }}">{{ l.level_ratio|ratio }}{% if l.level_bucket != 'unknown' %} · {{ {'match': 'your level', 'bigger': 'bigger', 'smaller': 'smaller'}[l.level_bucket] }}{% endif %}</span></td>
-    <td class="hide-sm">{{ l.metrics.get('instagram_reel_engagement')|compact }}{% set er = l.metrics|eng_rate %}{% if er is not none %} <span class="small {{ 'badge conf-low' if er < 1 else 'muted' }}" title="engagement rate: of {{ l.metrics.instagram_followers|compact }} followers{{ ' (low: followers may be inflated)' if er < 1 else '' }}">{{ '%.1f'|format(er) }}%</span>{% elif l.metrics.get('instagram_followers') %}<span class="small muted" title="followers">{{ l.metrics.instagram_followers|compact }} fol.</span>{% endif %}</td>
-    <td class="hide-sm">{{ l.metrics.get('tiktok_views')|compact }}{% if not l.metrics.get('tiktok_views') and l.metrics.get('tiktok_followers') %}<span class="small muted">{{ l.metrics.tiktok_followers|compact }} fol.</span>{% endif %}</td>
+    <td><div class="small">{{ l.level_ratio|ratio }}</div>{{ ui.meter(l.level_ratio, l.level_bucket, 'sm') }}</td>
+    <td class="hide-sm">{{ (l.metrics.get('instagram_reel_views') or l.metrics.get('instagram_reel_engagement'))|compact }}{% if not l.metrics.get('instagram_reel_views') and l.metrics.get('instagram_reel_engagement') %} <span class="small muted">likes</span>{% endif %}</td>
+    <td class="hide-sm">{{ l.metrics.get('tiktok_views')|compact }}</td>
     <td class="hide-sm">{{ l.metrics.get('youtube_views')|compact }}</td>
     <td>
       {% if l.best_email %}
+        <span class="dotc {{ l.best_confidence }}" title="{{ l.best_confidence }}"></span>
         <span class="email">{{ l.best_email }}</span>
-        <span class="badge conf-{{ l.best_confidence }}">{{ l.best_confidence }}</span>
         <button type="button" class="copy" onclick="copyText(this, '{{ l.best_email }}')">Copy</button>
       {% else %}<span class="muted small">none yet</span>{% endif %}
     </td>
-    <td>
-      <select class="status st-{{ l.status }}" onchange="this.className='status st-'+this.value; updateLead({{ l.id }}, {status: this.value})">
-        {% for s in STATUSES %}<option value="{{ s }}" {% if l.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}
-      </select>
-    </td>
-    <td class="links hide-sm">
-      {% if l.instagram %}<a href="https://www.instagram.com/{{ l.instagram }}/" target="_blank" rel="noopener">IG</a>{% endif %}
-      {% if l.tiktok %}<a href="https://www.tiktok.com/@{{ l.tiktok }}" target="_blank" rel="noopener">TT</a>{% endif %}
-      {% if l.spotify_url %}<a href="{{ l.spotify_url }}" target="_blank" rel="noopener">SP</a>{% endif %}
-      {% if l.website %}<a href="{{ l.website }}" target="_blank" rel="noopener">Web</a>{% endif %}
-    </td>
+    <td>{{ ui.status_select(l) }}</td>
+    <td class="hide-sm">{{ ui.links(l) }}</td>
   </tr>
   {% else %}
   <tr><td colspan="10" class="muted" style="padding:30px;text-align:center">
-    No artists match. <a href="{{ url_for('find') }}">Find some artists</a>{% if f.level %} or set the level filter to "Any level"{% endif %}.
+    No artists match. <a href="{{ url_for('find') }}">Find some artists</a>.
   </td></tr>
   {% endfor %}
   </tbody>
@@ -120,7 +257,7 @@
 </div>
 <div class="bulkbar" id="bulkbar"><div class="panel">
   <span id="nsel">0</span> selected
-  <select name="action">
+  <select name="action" aria-label="Action">
     {% for s in STATUSES %}<option value="{{ s }}">Mark: {{ STATUS_LABELS[s] }}</option>{% endfor %}
     <option value="recheck">Re-check emails</option>
     <option value="delete">Delete</option>
@@ -128,30 +265,117 @@
   <button class="primary">Apply</button>
 </div></div>
 </form>
+{% endif %}
 
+{% if view != 'board' %}
 {% if pages > 1 %}
 <div class="pager">
-  {% if page > 1 %}<a class="btn" href="{{ url_for('leads', page=page-1, **args) }}">← Prev</a>{% endif %}
+  {% if page > 1 %}<a class="btn" href="{{ url_for('leads', page=page-1, view=view, **args) }}">← Prev</a>{% endif %}
   <span class="muted">Page {{ page }} of {{ pages }} · {{ total }} artists</span>
-  {% if page < pages %}<a class="btn" href="{{ url_for('leads', page=page+1, **args) }}">Next →</a>{% endif %}
+  {% if page < pages %}<a class="btn" href="{{ url_for('leads', page=page+1, view=view, **args) }}">Next →</a>{% endif %}
 </div>
 {% else %}
 <p class="muted small" style="text-align:center">{{ total }} artist{{ '' if total == 1 else 's' }} shown</p>
 {% endif %}
+{% endif %}
+<div class="tip" id="tip"></div>
 {% endblock %}
+
 {% block scripts %}
+<script id="points" type="application/json">{{ points|tojson }}</script>
 <script>
-const picks = [...document.querySelectorAll('.pick')];
-function syncBulk() {
-  const n = picks.filter(p => p.checked).length;
-  document.getElementById('nsel').textContent = n;
-  document.getElementById('bulkbar').classList.toggle('on', n > 0);
-}
-picks.forEach(p => p.addEventListener('change', syncBulk));
-document.getElementById('all').addEventListener('change', e => { picks.forEach(p => p.checked = e.target.checked); syncBulk(); });
-document.getElementById('bulk').addEventListener('submit', e => {
-  if (e.target.action.value === 'delete' && !confirm('Delete the selected artists?')) e.preventDefault();
-});
 window.reloadWhenJobsFinish = true;
+const BAND = [{{ band_low }}, {{ band_high }}];
+
+/* ---- level map: x = engagement vs me (log, 1/32x..32x), y = email confidence ---- */
+(function () {
+  const svg = document.getElementById('map');
+  if (!svg) return;
+  const pts = JSON.parse(document.getElementById('points').textContent);
+  const tip = document.getElementById('tip');
+  const NS = 'http://www.w3.org/2000/svg';
+  const SPAN = Math.log(32);
+  const el = (n, a, parent) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); (parent || svg).appendChild(e); return e; };
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function fmt(r) { return r >= 10 ? r.toFixed(0) + '×' : r >= 1 ? r.toFixed(1) + '×' : r.toFixed(2) + '×'; }
+
+  function draw() {
+    svg.innerHTML = '';
+    const W = svg.clientWidth, H = svg.clientHeight;
+    const m = {l: 64, r: 14, t: 14, b: 26};
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const x = r => m.l + Math.min(1, Math.max(0, (Math.log(r) / SPAN + 1) / 2)) * iw;
+    // y: no email at the bottom row, then 0..100 confidence above it
+    const y = s => m.t + ih - (s ? 14 + (s / 100) * (ih - 14) : 4);
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+    el('rect', {class: 'bandrect', x: x(BAND[0]), y: m.t, width: x(BAND[1]) - x(BAND[0]), height: ih, rx: 6});
+    for (const [s, label] of [[100, 'certain'], [80, 'high'], [55, 'medium'], [0, 'no email']]) {
+      const yy = s ? y(s) : y(0);
+      if (s) el('line', {class: 'grid', x1: m.l, x2: m.l + iw, y1: yy, y2: yy});
+      el('text', {x: m.l - 6, y: yy + 4, 'text-anchor': 'end'}).textContent = label;
+    }
+    el('line', {class: 'you', x1: x(1), x2: x(1), y1: m.t, y2: m.t + ih});
+    for (const [r, label] of [[1/32, '1/32×'], [1/4, '¼×'], [1, 'you'], [4, '4×'], [32, '32×']]) {
+      el('text', {x: x(r), y: H - 8, 'text-anchor': r === 1/32 ? 'start' : r === 32 ? 'end' : 'middle'}).textContent = label;
+    }
+    // Draw out-of-range dots first so in-range ones sit on top.
+    const sorted = pts.slice().sort((a, b) => (a.bucket === 'match') - (b.bucket === 'match'));
+    for (const p of sorted) {
+      const jitter = ((p.id * 2654435761) % 1000) / 1000 - .5;   // stable spread for the no-email row
+      const c = el('circle', {class: 'dot ' + (p.bucket === 'match' ? 'in' : 'out'), cx: x(p.r), cy: y(p.score) + (p.score ? 0 : jitter * 6), r: 5});
+      const hit = el('circle', {cx: c.getAttribute('cx'), cy: c.getAttribute('cy'), r: 11, fill: 'transparent', style: 'cursor:pointer'});
+      hit.addEventListener('mouseenter', e => {
+        c.classList.add('hl');
+        tip.innerHTML = `<b>${esc(p.name)}</b><br>${fmt(p.r)} your engagement` +
+          `<br>${p.email ? esc(p.email) + ' · ' + esc(p.conf) : 'no email yet'}<br><span class="muted">${esc(p.status)}</span>`;
+        tip.style.display = 'block';
+      });
+      hit.addEventListener('mousemove', e => {
+        const tw = tip.offsetWidth;
+        tip.style.left = Math.min(e.clientX + 14, innerWidth - tw - 8) + 'px';
+        tip.style.top = (e.clientY + 14) + 'px';
+      });
+      hit.addEventListener('mouseleave', () => { c.classList.remove('hl'); tip.style.display = 'none'; });
+      hit.addEventListener('click', () => location.href = '/lead/' + p.id + '?back=' + encodeURIComponent(location.pathname + location.search));
+    }
+  }
+  draw();
+  addEventListener('resize', draw);
+})();
+
+/* ---- board drag & drop ---- */
+document.querySelectorAll('.mini').forEach(card => {
+  card.addEventListener('dragstart', e => { card.classList.add('dragging'); e.dataTransfer.setData('text/plain', card.dataset.id); });
+  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+});
+document.querySelectorAll('.col').forEach(col => {
+  col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
+  col.addEventListener('dragleave', () => col.classList.remove('over'));
+  col.addEventListener('drop', async e => {
+    e.preventDefault(); col.classList.remove('over');
+    const id = e.dataTransfer.getData('text/plain');
+    const card = document.querySelector(`.mini[data-id="${id}"]`);
+    if (!card || card.parentElement === col) return;
+    col.appendChild(card);
+    await updateLead(id, {status: col.dataset.status});
+    document.querySelectorAll('.col').forEach(c => c.querySelector('h3 .n').textContent = c.querySelectorAll('.mini').length);
+  });
+});
+
+/* ---- list bulk actions ---- */
+const picks = [...document.querySelectorAll('.pick')];
+if (picks.length) {
+  const sync = () => {
+    const n = picks.filter(p => p.checked).length;
+    document.getElementById('nsel').textContent = n;
+    document.getElementById('bulkbar').classList.toggle('on', n > 0);
+  };
+  picks.forEach(p => p.addEventListener('change', sync));
+  document.getElementById('all').addEventListener('change', e => { picks.forEach(p => p.checked = e.target.checked); sync(); });
+  document.getElementById('bulk').addEventListener('submit', e => {
+    if (e.target.action.value === 'delete' && !confirm('Delete the selected artists?')) e.preventDefault();
+  });
+}
 </script>
 {% endblock %}

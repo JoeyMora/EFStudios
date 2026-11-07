@@ -15,13 +15,13 @@
     <div><label>{{ label }}</label><input type="text" name="my_{{ key }}" value="{{ s.get('my_' ~ key, '') }}" placeholder="e.g. 350" style="width:100%"></div>
     {% endfor %}
   </div>
-  <p class="small muted">Use typical numbers (ignore your one viral post). For Instagram: likes + comments on an average recent post. Easiest: use "Fill in automatically", or capture your own TikTok with the bookmarklet and press "This is me".</p>
+  <p class="small muted">Use typical numbers (ignore your one viral post). Instagram is measured on <b>reels</b>. Easiest: open your own Instagram <b>Reels</b> tab or TikTok, click <b>Capture artist</b>, and press <b>This is me</b>.</p>
   <h2 style="margin-top:18px">"Around my level" means</h2>
   <div class="row">
     from <input type="number" step="0.05" min="0.01" name="level_low" value="{{ s.level_low }}" style="width:80px">×
     to <input type="number" step="0.5" min="1" name="level_high" value="{{ s.level_high }}" style="width:80px">× my size
   </div>
-  <p class="small muted">Default 0.25× to 4×: if your posts get about 400 likes + comments, that's artists getting about 100 to 1,600.</p>
+  <p class="small muted">Default 0.25× to 4×: if your reels get about 4K views, that's artists getting about 1K to 16K.</p>
 
   <h2 style="margin-top:18px">Email template</h2>
   <p class="small muted">Used by the "Email" button on an artist page. <code class="k">{artist}</code> and <code class="k">{first_name}</code> are filled in.</p>
@@ -36,11 +36,11 @@
   <h2>Fill in my engagement automatically</h2>
   <label>My Instagram handle {% if not status['Instagram Business Discovery'] %}<span class="muted">(needs Meta keys)</span>{% endif %}</label>
   <input type="text" name="my_instagram" value="{{ s.get('my_instagram', '') }}" placeholder="@yourhandle" style="width:100%">
-  <p class="small muted">Median likes + comments over your last 12 posts.</p>
+  <p class="small muted">Median likes + comments over your last 12 reels. (Reel views aren't in the API: capture your Reels tab for those.)</p>
   <label>My YouTube channel link {% if not status['YouTube'] %}<span class="muted">(needs YouTube key)</span>{% endif %}</label>
   <input type="text" name="my_youtube_url" value="{{ s.get('my_youtube_url', '') }}" placeholder="https://www.youtube.com/@you" style="width:100%">
   <p class="small muted">Median views over your last 10 uploads.</p>
-  <p class="small"><b>TikTok:</b> open your own TikTok profile, click the <b>Capture artist</b> bookmarklet, then press <b>This is me</b>.</p>
+  <p class="small"><b>Instagram reel views &amp; TikTok views:</b> open your own Instagram <b>Reels</b> tab (instagram.com/you/reels) or TikTok profile, click the <b>Capture artist</b> bookmarklet, then press <b>This is me</b>.</p>
   <div style="margin-top:12px"><button>Fetch my numbers</button></div>
 </form>
 
@@ -49,9 +49,9 @@
   <p class="small">Drag this to your bookmarks bar:</p>
   <p><a class="bookmarklet" href="{{ bookmarklet }}" onclick="alert('Drag this button to your bookmarks bar, then click it while viewing an artist\'s profile.'); return false;">Capture artist</a></p>
   <ol class="small">
-    <li>Open an artist's Instagram or TikTok profile in your browser (logged in as normal).</li>
+    <li>Open an artist's Instagram <b>Reels</b> tab (instagram.com/name/reels) or TikTok profile in your browser, logged in as normal.</li>
     <li>Click <b>Capture artist</b> in your bookmarks bar.</li>
-    <li>A tab opens here with their bio email and, on TikTok, their typical views per video compared with yours. If the bio has a Linktree or website, it's checked automatically.</li>
+    <li>A tab opens here with their bio email and their typical views per reel or video, compared with yours. If the bio has a Linktree or website, it's checked automatically.</li>
   </ol>
   <p class="small muted">It only reads the page you're looking at. It also works on Linktree pages and artist websites. Keep this app running while you browse.</p>
 </div>
