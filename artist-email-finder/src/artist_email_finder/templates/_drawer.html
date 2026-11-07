@@ -63,6 +63,17 @@
   </div>
 
   <div class="panel">
+    <div class="row"><h2 style="margin:0">Momentum</h2><span class="spacer"></span>
+      {% if lead.momentum is not none %}<span class="mom">{{ lead.momentum|round|int }}</span>{% endif %}</div>
+    {% if lead.momentum is not none %}
+    <div class="mombar" role="img" aria-label="Momentum {{ lead.momentum|round|int }} of 100"><div style="width:{{ lead.momentum }}%"></div></div>
+    <p class="small muted" style="margin:0">{{ lead.momentum_note[:1]|upper }}{{ lead.momentum_note[1:] }}.</p>
+    {% else %}
+    <p class="small muted" style="margin:8px 0 0">Needs reel or TikTok views plus follower counts. Capture their Reels tab or TikTok, and re-check over time to see growth.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
     <h2>Emails</h2>
     {% for e in lead.emails %}
     <div class="emailcard">

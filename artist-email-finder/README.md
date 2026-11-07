@@ -2,9 +2,14 @@
 
 An app for finding artists to work with, at your level, with their booking or management emails.
 
-- **Discover: just ask.** Type what you want, for example "find me a female punk rock band", "an Asian artist that sings rock and roll", or "R&B singers in Atlanta at my level". The app works out the genres, gender, solo or band, region, city and level you mean, searches the music databases, keeps only artists that fit, and finds their emails. Results stream in as photo tiles, each showing why it matched.
+- **Discover: just ask.** Type what you want, for example "find me a female punk rock band", "an Asian artist that sings rock and roll", "R&B singers in Atlanta at my level", "indie bands like Alvvays", or "trending drill rappers". The app works out the genres, gender, solo or band, region, city, level and "like" artist you mean, searches the music databases, keeps only artists that fit, and finds their emails. Results stream in as photo tiles, each showing why it matched.
+- **Galaxy.** Every artist is a star and you're the sun at the center.
+  - The closer a star, the closer that artist is to your level.
+  - Bigger stars are bigger artists.
+  - Brighter, faster-twinkling stars have more **momentum**: how far their reels and TikToks reach beyond their own followers, and how fast their engagement grows between checks.
+  - Genres form constellations. Hover a star for details and click it to open the artist.
 - **For you.** Picks based on the artists you star, shortlist, contact or reply to, and steered away from the ones you mark "not a fit". Swipe through them like a deck: save (→) or pass (←). Every swipe teaches it your taste.
-- **Every artist has a genre.** Genres come from MusicBrainz, then Spotify, then Last.fm listener tags. If none of those know the artist, Claude reads their own bio and link pages. You can always edit the genres.
+- **Every artist has a genre.** Genres come from MusicBrainz, then Spotify, then Last.fm listener tags. If none of those know the artist, genre words in their own bio and link pages are used. You can always edit the genres.
 - **Around your level, based on engagement.** Instagram reel views and likes, TikTok views and YouTube views are compared with your own numbers. Follower counts are shown, but never used for level.
 - **Works like an app:**
   - Tap any artist for a slide-in panel with photo, level, "you vs them" bars, emails, notes and a one-tap pre-filled email.
@@ -13,12 +18,30 @@ An app for finding artists to work with, at your level, with their booking or ma
 
 ### How prompts are understood
 
-With an `ANTHROPIC_API_KEY`, Claude turns your prompt into a search plan. It uses Claude Opus 5.5 at low effort, a few cents per search. Without a key, a keyword parser handles the common cases.
+No AI is involved. A rule-based parser reads your prompt. It knows:
+- about 120 genre names and spellings ("rock n roll", "rnb", "hiphop")
+- "female", "band", "duo" and "solo"
+- regions, nationalities and cities ("in Atlanta", "Chicago-based")
+- "like [artist]" and "similar to [artist]"
+- "trending" or "blowing up"
+- "bigger" or "smaller"
+- a number of results
+
+The tags under your search show exactly how it read the prompt.
 
 Identity filters only use what artists publish about themselves:
 - **Gender and solo vs band:** the gender and type listed on MusicBrainz.
 - **Region:** the country of origin and area listed on MusicBrainz, plus self-identification tags like "asian american".
 - **Nothing is inferred from names or photos.** Artists whose details aren't published are kept and ranked lower, rather than guessed about.
+
+### Momentum
+
+Momentum is a score from 0 to 100 that combines two signals:
+
+- **Reach:** typical views per reel or TikTok divided by followers. Content seen by 3× their followers is being pushed by the algorithm.
+- **Growth:** how fast their engagement changes between checks. Re-check artists every week or two and the growth half kicks in.
+
+It drives star brightness in the Galaxy, the "▲ Rising" filter, the "trending" prompt word, and gives a boost to For You picks.
 
 ## Quick start
 
@@ -36,6 +59,7 @@ This opens http://127.0.0.1:5005. Your leads are saved in `leads.db` in the fold
 2. **Discover:** describe who you're looking for.
 3. **Artists / Pipeline:** star the ones you like and move them along as you reach out.
 4. **For you:** after a few stars or shortlists, swipe through picks made for you.
+5. **Galaxy:** see everyone at a glance; the bright stars near the center are your best bets.
 
 ## Instagram & TikTok
 
@@ -62,7 +86,6 @@ The limit is about 200 lookups per hour. When the token expires, lookups quietly
 
 | Key | Unlocks | Where |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Smart prompt search, genre detection from bios, AI suggestions in "For you" | console.anthropic.com |
 | `META_ACCESS_TOKEN`, `IG_USER_ID` | Instagram reel likes + comments, bio, website, followers, profile photo | see above |
 | `BRAVE_API_KEY` or `SERPAPI_API_KEY` | Web search for emails, plus Instagram/TikTok profile snippets | brave.com/search/api, serpapi.com |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | Discover by genre, Spotify followers | developer.spotify.com/dashboard |

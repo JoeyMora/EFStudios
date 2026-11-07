@@ -92,7 +92,7 @@ def test_web_pages(tmp_path):
     assert "8.1%" in c.get(f"/lead/{lead_id}").data.decode()   # 250 / 3,100 followers
     assert 'class="tile' in c.get("/artists").data.decode()
     page = c.get("/pipeline").data.decode()
-    assert 'class="mini" draggable="true"' in page and "Where your leads sit" in page
+    assert 'class="mini" draggable="true"' in page and "See everyone in the Galaxy" in page
     page = c.get(f"/lead/{lead_id}").data.decode()
     assert "mailto:nova@mgmt.co?subject=Hi%20Lil%20Nova&amp;body=Yo%20Lil" in page
 
@@ -175,19 +175,24 @@ def test_instagram_counts_once_per_platform():
     assert round(ratio(theirs, mine), 6) == 2.0
 
 
-def test_map_points_and_meters(tmp_path):
+def test_galaxy_and_meters(tmp_path):
     import json, re
     app = create_app(str(tmp_path / "leads.db"), Settings(), start_jobs=False)
     store, c = app.config["store"], app.test_client()
     store.save_settings({"my_tiktok_views": "1000"})
-    store.save_artist(Artist(name="Peer", metrics={"tiktok_views": 2000}, image_url="https://i.scdn.co/x.jpg"))
+    store.save_artist(Artist(name="Peer", metrics={"tiktok_views": 2000, "tiktok_followers": 1000},
+                             genres=["drill"], image_url="https://i.scdn.co/x.jpg"))
     store.save_artist(Artist(name="Star", metrics={"tiktok_views": 500_000}))
     store.save_artist(Artist(name="Mystery"))
-    page = c.get("/pipeline").data.decode()
-    points = json.loads(re.search(r'<script id="points" type="application/json">(.*?)</script>', page, re.S).group(1))
-    assert {p["name"]: p["bucket"] for p in points} == {"Peer": "match", "Star": "bigger"}
-    assert "1 with unknown engagement not shown" in page
-    assert 'src="https://i.scdn.co/x.jpg"' in page
+    page = c.get("/galaxy").data.decode()
+    stars = json.loads(re.search(r'<script id="stars" type="application/json">(.*?)</script>', page, re.S).group(1))
+    by = {s["name"]: s for s in stars}
+    assert set(by) == {"Peer", "Star", "Mystery"}
+    assert by["Peer"]["bucket"] == "match" and by["Peer"]["genre"] == "drill" and by["Peer"]["m"] > 60
+    assert by["Mystery"]["r"] is None and by["Mystery"]["m"] is None
+    assert "Brightest right now" in page and "Peer" in page
     # Peer at 2x sits right of center on the 1/32x..32x meter: (log 2 / log 32 + 1) / 2 = 60%
     peer = store.find_lead(name="Peer")["id"]
-    assert "left:60.0%" in c.get(f"/lead/{peer}/drawer").data.decode()
+    drawer = c.get(f"/lead/{peer}/drawer").data.decode()
+    assert "left:60.0%" in drawer and "Momentum" in drawer and "Views 2.0× their followers per TikTok" in drawer
+    assert "Rising" in c.get("/artists?rising=1").data.decode()

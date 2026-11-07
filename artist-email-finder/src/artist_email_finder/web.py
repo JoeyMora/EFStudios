@@ -13,7 +13,7 @@ from urllib.parse import quote, urlencode, urlparse
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
 
-from .ai import SearchPlan, ai_available, plan_search
+from .prompt import SearchPlan, plan_search
 from .config import Settings
 from .counts import followers_in, parse_count
 from .extract import context_for, emails_from_text
@@ -28,7 +28,7 @@ from .sources.instagram import InstagramGraph, instagram_handle, tiktok_handle
 from .sources.youtube import YouTube
 from .store import STATUS_LABELS, STATUSES, Store
 
-FILTER_KEYS = ("q", "status", "level", "has_email", "min_confidence", "genre", "sort", "starred")
+FILTER_KEYS = ("q", "status", "level", "has_email", "min_confidence", "genre", "sort", "starred", "rising")
 BIO_LINK_RE = re.compile(
     r"\b((?:https?://)?(?:www\.)?(?:linktr\.ee|beacons\.ai|lnk\.bio|hoo\.be|solo\.to|bio\.link|"
     r"stan\.store|[\w-]+\.carrd\.co|linkin\.bio|allmylinks\.com|msha\.ke|komi\.io|"
@@ -216,7 +216,7 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
 
     @app.context_processor
     def shell_context():
-        return {"ai_on": ai_available(), "pick_count": len(store.picks(99))}
+        return {"pick_count": len(store.picks(99))}
 
     # -- discover (prompt search) -------------------------------------------------
     @app.get("/")
@@ -291,7 +291,7 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
         f = current_filters()
         per_page = 60
         page = max(1, request.args.get("page", 1, type=int))
-        rows, total = store.leads(**{**f, "starred": f["starred"] == "1"}, limit=per_page * page)
+        rows, total = store.leads(**{**f, "starred": f["starred"] == "1", "rising": f["rising"] == "1"}, limit=per_page * page)
         args = {k: v for k, v in f.items() if v}
         return render_template("artists.html", leads=rows, total=total, f=f, page=page,
                                more=total > per_page * page, args=args, counts=store.counts(),
@@ -301,19 +301,25 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
     @app.get("/pipeline")
     def pipeline():
         rows, _ = store.leads(status="", limit=2000, sort="updated")
-        points = [{"id": r["id"], "name": r["name"], "r": r["level_ratio"],
-                   "score": r["best_score"], "email": r["best_email"],
-                   "conf": r["best_confidence"], "status": STATUS_LABELS[r["status"]],
-                   "img": r["image_url"], "bucket": r["level_bucket"]}
-                  for r in rows if r["level_ratio"] is not None and r["status"] != "not_a_fit"]
-        unknown = sum(1 for r in rows if r["level_ratio"] is None)
-        return render_template("pipeline.html", leads=rows, points=points, unknown=unknown,
+        return render_template("pipeline.html", leads=rows,
                                counts=store.counts(), has_level=bool(store.my_metrics()))
+
+    @app.get("/galaxy")
+    def galaxy():
+        rows, _ = store.leads(status="", limit=5000, sort="momentum")
+        stars = [{"id": r["id"], "name": r["name"], "genre": (r["genre_list"] or [""])[0],
+                  "r": r["level_ratio"], "bucket": r["level_bucket"], "m": r["momentum"],
+                  "note": r["momentum_note"], "email": r["best_email"], "conf": r["best_confidence"],
+                  "status": r["status"], "statusLabel": STATUS_LABELS[r["status"]], "starred": r["starred"]}
+                 for r in rows]
+        brightest = [r for r in rows if r["momentum"] is not None and r["status"] != "not_a_fit"][:8]
+        return render_template("galaxy.html", stars=stars, brightest=brightest,
+                               has_level=bool(store.my_metrics()), counts=store.counts())
 
     @app.get("/export.csv")
     def export():
         f = current_filters()
-        rows, _ = store.leads(**{**f, "starred": f["starred"] == "1"}, limit=100_000)
+        rows, _ = store.leads(**{**f, "starred": f["starred"] == "1", "rising": f["rising"] == "1"}, limit=100_000)
         buf = io.StringIO()
         cols = ["name", "best_email", "best_confidence", "status", "level", "genres", "tags",
                 "gender", "artist_type", "country", "location", "instagram", "tiktok", "website",

@@ -11,6 +11,7 @@ import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import momentum as momentum_mod
 from .level import ENGAGEMENT, bucket, ratio
 from .models import Artist, ArtistResult, EmailResult
 from .scoring import label
@@ -93,7 +94,13 @@ CREATE TABLE IF NOT EXISTS search_results (
     created_at REAL,
     PRIMARY KEY (search_id, lead_id)
 );
+CREATE TABLE IF NOT EXISTS snapshots (
+    lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+    at REAL,
+    metrics TEXT
+);
 CREATE INDEX IF NOT EXISTS leads_status ON leads(status);
+CREATE INDEX IF NOT EXISTS snapshots_lead ON snapshots(lead_id, at);
 """
 
 # Columns added after the first release: (name, SQL type and default).
@@ -106,6 +113,8 @@ NEW_COLUMNS = [
     ("pick_reason", "TEXT DEFAULT ''"),
     ("pick_score", "REAL DEFAULT 0"),
     ("picked_at", "REAL"),
+    ("momentum", "REAL"),
+    ("momentum_note", "TEXT DEFAULT ''"),
 ]
 
 
@@ -125,9 +134,13 @@ class Store:
             c.executescript(SCHEMA)
             # Columns added after the first release.
             cols = {r["name"] for r in c.execute("PRAGMA table_info(leads)")}
+            added = [name for name, decl in NEW_COLUMNS if name not in cols]
             for name, decl in NEW_COLUMNS:
-                if name not in cols:
+                if name in added:
                     c.execute(f"ALTER TABLE leads ADD COLUMN {name} {decl}")
+            ids = [r["id"] for r in c.execute("SELECT id FROM leads")] if "momentum" in added else []
+        for lead_id in ids:  # first run after the momentum upgrade: score existing leads
+            self._refresh(lead_id)
 
     @contextmanager
     def conn(self):
@@ -255,8 +268,28 @@ class Store:
                 lead_id = cur.lastrowid
         if result:
             self.add_emails(lead_id, result.emails)
+            self.snapshot(lead_id, metrics)
         self._refresh(lead_id)
         return lead_id
+
+    def snapshot(self, lead_id: int, metrics: dict, at: float | None = None) -> None:
+        """Remember today's numbers so growth can be measured on later checks
+        (one snapshot per lead per 12 hours; the newest wins)."""
+        at = at or time.time()
+        with self.conn() as c:
+            last = c.execute("SELECT rowid, at FROM snapshots WHERE lead_id = ? ORDER BY at DESC LIMIT 1",
+                             (lead_id,)).fetchone()
+            if last and at - last["at"] < 12 * 3600:
+                c.execute("UPDATE snapshots SET metrics = ?, at = ? WHERE rowid = ?",
+                          (json.dumps(metrics), at, last["rowid"]))
+            else:
+                c.execute("INSERT INTO snapshots(lead_id, at, metrics) VALUES(?,?,?)",
+                          (lead_id, at, json.dumps(metrics)))
+
+    def snapshots(self, lead_id: int) -> list[tuple[float, dict]]:
+        with self.conn() as c:
+            return [(r["at"], json.loads(r["metrics"])) for r in
+                    c.execute("SELECT at, metrics FROM snapshots WHERE lead_id = ? ORDER BY at", (lead_id,))]
 
     def add_emails(self, lead_id: int, emails: list[EmailResult]) -> None:
         with self.conn() as c:
@@ -285,6 +318,7 @@ class Store:
                       **{k: v for k, v in metrics.items() if v is not None}}
             c.execute("UPDATE leads SET metrics = ?, updated_at = ? WHERE id = ?",
                       (json.dumps(merged), time.time(), lead_id))
+        self.snapshot(lead_id, merged)
         self._refresh(lead_id)
 
     def _refresh(self, lead_id: int) -> None:
@@ -295,11 +329,15 @@ class Store:
             row = c.execute("SELECT metrics FROM leads WHERE id = ?", (lead_id,)).fetchone()
             if not row:
                 return
-            r, b = self.level_of(json.loads(row["metrics"] or "{}"))
+            metrics = json.loads(row["metrics"] or "{}")
+            r, b = self.level_of(metrics)
+            snaps = [(s["at"], json.loads(s["metrics"])) for s in c.execute(
+                "SELECT at, metrics FROM snapshots WHERE lead_id = ? ORDER BY at", (lead_id,))]
+            mom, note = momentum_mod.score(metrics, snaps)
             c.execute("UPDATE leads SET best_email = ?, best_confidence = ?, best_score = ?, "
-                      "level_ratio = ?, level_bucket = ? WHERE id = ?",
+                      "level_ratio = ?, level_bucket = ?, momentum = ?, momentum_note = ? WHERE id = ?",
                       (best["email"] if best else "", best["confidence"] if best else "",
-                       best["score"] if best else 0, r, b, lead_id))
+                       best["score"] if best else 0, r, b, mom, note, lead_id))
 
     def update_lead(self, lead_id: int, **fields) -> None:
         allowed = {"status", "notes", "starred", "name", "instagram", "tiktok", "website", "genres",
@@ -333,7 +371,7 @@ class Store:
         return {**_lead_dict(row), "emails": [dict(e) for e in emails]}
 
     def leads(self, *, q: str = "", status: str = "", level: str = "", has_email: str = "",
-              min_confidence: str = "", genre: str = "", starred: bool = False,
+              min_confidence: str = "", genre: str = "", starred: bool = False, rising: bool = False,
               sort: str = "level", limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
         where, args = [], []
         if q:
@@ -363,6 +401,8 @@ class Store:
             args.append(f"%{genre}%")
         if starred:
             where.append("starred = 1")
+        if rising:
+            where.append("momentum >= 60")
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         order = {
             # Closest to my size first (|log ratio|), unknown sizes last.
@@ -372,6 +412,7 @@ class Store:
             "newest": "created_at DESC",
             "updated": "updated_at DESC",
             "biggest": "level_ratio IS NULL, level_ratio DESC",
+            "momentum": "momentum IS NULL, momentum DESC",
             "smallest": "level_ratio IS NULL, level_ratio ASC",
         }.get(sort, "created_at DESC")
         with self.conn() as c:

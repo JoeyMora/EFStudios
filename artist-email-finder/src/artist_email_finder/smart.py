@@ -5,7 +5,7 @@ from __future__ import annotations
 from itertools import zip_longest
 from typing import Iterable, Iterator
 
-from .ai import SearchPlan
+from .prompt import SearchPlan
 from .models import Artist
 
 COUNTRY_NAMES = {

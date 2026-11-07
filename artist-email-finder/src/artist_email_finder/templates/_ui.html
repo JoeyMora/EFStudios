@@ -50,6 +50,7 @@
       {% set rows = platform_rows(lead.metrics) %}
       {% if rows %}{{ icon(rows[0].platform) }}<span>{{ rows[0].text }}</span>{% else %}<span>No engagement data</span>{% endif %}
       <span class="spacer"></span>
+      {% if lead.momentum is not none and lead.momentum >= 60 %}<span class="rising" title="Momentum {{ lead.momentum|round|int }}/100">▲ Rising</span>{% endif %}
       {% if lead.status != 'new' %}<span class="chip tiny">{{ STATUS_LABELS[lead.status] }}</span>{% endif %}
     </div>
   </div>

@@ -16,10 +16,7 @@
     <button type="button" class="sm" data-example="{{ ex }}">{{ ex }}</button>
     {% endfor %}
   </div>
-  <div class="aimode">
-    {% if ai_on %}{{ ui.icon('sparkle') }} Smart search is on: prompts are understood by Claude.
-    {% else %}Keyword mode. Add <code class="k">ANTHROPIC_API_KEY</code> to <code class="k">.env</code> for smarter prompt understanding.{% endif %}
-  </div>
+  <div class="aimode">Try: a genre, “female” / “band” / “solo”, a city or region, “like <i>artist</i>”, “trending”, or a number.</div>
 </section>
 
 {% if search %}
@@ -29,7 +26,6 @@
 </div>
 <div class="chips planchips">
   {% for c in plan.chips() %}<span class="chip soft">{{ c }}</span>{% endfor %}
-  {% if plan.parsed_by == 'keywords' %}<span class="chip tiny" title="Add an Anthropic key for smarter parsing">keyword match</span>{% endif %}
 </div>
 <div class="tiles" id="results">
   {% with leads=results, show_reason=True %}{% include "_tiles.html" %}{% endwith %}

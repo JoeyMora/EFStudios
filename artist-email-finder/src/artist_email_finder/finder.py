@@ -6,7 +6,7 @@ import logging
 import re
 from urllib.parse import urlparse
 
-from . import ai
+from . import prompt
 from .config import Settings
 from .genres import merge as merge_genres, split_tags
 from .extract import context_for, emails_from_text
@@ -226,7 +226,7 @@ class Finder:
             artist.genres = merge_genres(artist.genres, g)
             artist.tags = merge_genres(artist.tags, other, limit=10)
         if not artist.genres:
-            artist.genres = ai.infer_genres(artist.name, texts)
+            artist.genres = prompt.infer_genres(artist.name, texts)
             if artist.genres:
                 result.notes.append("genre inferred from bio")
 

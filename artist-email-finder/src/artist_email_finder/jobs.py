@@ -12,8 +12,7 @@ import threading
 import traceback
 from typing import Iterator
 
-from . import ai
-from .ai import SearchPlan
+from .prompt import SearchPlan
 from .config import Settings
 from .genres import merge as merge_genres
 from .smart import genre_profile, interleave, match
@@ -134,8 +133,16 @@ class JobRunner:
         limit = plan.limit or 20
 
         sources = []
-        if plan.suggested_artists:
-            sources.append(Artist(name=n, discovered_via="ai suggestion") for n in plan.suggested_artists)
+        lf = LastFm(http, s.lastfm_api_key) if s.lastfm_api_key else None
+        if plan.similar_to:
+            # "like <artist>": their listed genres fill in the style, and their
+            # Last.fm neighbours are the first candidates.
+            seed = mb.profile(plan.similar_to)
+            if seed and not plan.genres:
+                plan.genres = seed.get("genres", [])[:2]
+            if lf:
+                sources.append(Artist(name=n, discovered_via="lastfm")
+                               for n, _ in lf.similar_scored(plan.similar_to, limit=80))
         query = mb.build_query(plan.genres, plan.tags, plan.gender, plan.artist_type,
                                plan.countries, plan.identity_tags, plan.areas)
         sources.append(mb.search(query, max_results=500))
@@ -143,8 +150,7 @@ class JobRunner:
             # A looser MusicBrainz query by genre alone, when no identity filters apply.
             sources.append(mb.search(mb.build_query(plan.genres, areas=plan.areas), max_results=300))
         style_tags = (plan.genres + plan.tags + plan.identity_tags)[:4]
-        if s.lastfm_api_key:
-            lf = LastFm(http, s.lastfm_api_key)
+        if lf:
             sources += [lf.tag_artists(t, max_pages=8) for t in style_tags]
         if s.has_spotify and plan.genres:
             sp = Spotify(http, s.spotify_client_id, s.spotify_client_secret)
@@ -181,7 +187,7 @@ class JobRunner:
                     base.metrics, base.spotify_url, base.image_url = cand.metrics, cand.spotify_url, cand.image_url
                     base.genres = merge_genres(base.genres, cand.genres)
                     cand = base
-            trusted = cand.discovered_via in ("lastfm", "ai suggestion")
+            trusted = cand.discovered_via == "lastfm"
             ok, score, reasons = match(cand, plan, trusted_style=trusted)
             if not ok:
                 continue
@@ -191,6 +197,14 @@ class JobRunner:
             if not self._level_ok(metrics, plan.level):
                 continue
             ok, score, reasons = match(cand, plan, trusted_style=trusted)  # genres may be filled in now
+            lead = self.store.lead(lead_id)
+            if plan.trending:
+                if (lead["momentum"] or 0) < 40:
+                    continue
+                score += lead["momentum"] / 40
+                reasons.append("rising")
+            if plan.similar_to and cand.discovered_via == "lastfm":
+                reasons.insert(0, f"Like {plan.similar_to}")
             self.store.add_search_result(search["id"], lead_id, score + (.3 if result.emails else 0),
                                          " · ".join(reasons))
             kept += 1
@@ -233,8 +247,6 @@ class JobRunner:
                     add(a.name, .25, f"Plays {g}, like artists you saved")
                     if i > 120:
                         break
-        for sug in ai.suggest_artists(liked, passed):
-            add(sug["name"], .8, sug["why"])
         for g in liked_genres[:2]:
             self._check(job_id)
             for i, a in enumerate(mb.search(mb.build_query([g]), max_results=100)):
@@ -258,6 +270,7 @@ class JobRunner:
             if genres and genres <= passed_genres:
                 score -= 1
             lead_id = self.store.save_artist(artist, result)
+            score += (self.store.lead(lead_id)["momentum"] or 0) / 100  # favour artists with pull
             if not self._level_ok({**artist.metrics, **result.metrics}, "my_level") or score <= 0:
                 continue
             self.store.set_pick(lead_id, " · ".join(c["reasons"][:2]), round(score, 2))

@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from artist_email_finder import ai, jobs
-from artist_email_finder.ai import SearchPlan, keyword_plan
+from artist_email_finder import jobs
+from artist_email_finder.prompt import SearchPlan, infer_genres, keyword_plan
 from artist_email_finder.config import Settings
 from artist_email_finder.genres import split_tags
 from artist_email_finder.jobs import JobRunner
@@ -45,33 +45,26 @@ def test_musicbrainz_query():
                  '(country:JP OR tag:"asian american") AND (area:"Tokyo" OR beginarea:"Tokyo")')
 
 
-# ---------------------------------------------------------------- Claude request shape
-def test_plan_search_uses_structured_output_and_fallbacks(monkeypatch):
-    sent = {}
-
-    def create(**kw):
-        sent.update(kw)
-        plan = {"summary": "Female punk bands", "genres": ["Punk Rock"], "tags": ["riot grrrl"],
-                "gender": "female", "artist_type": "group", "countries": [], "identity_tags": [],
-                "region_label": "", "areas": [], "level": "my_level",
-                "suggested_artists": ["Some Band"], "limit": 15}
-        return SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text=json.dumps(plan))])
-
-    fake = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create)))
-    monkeypatch.setattr(ai, "_client", lambda: fake)
-    plan = ai.plan_search("female punk bands")
-    assert plan.parsed_by == "claude" and plan.genres == ["punk rock"] and plan.limit == 15
-    assert sent["model"] == "claude-opus-5-5"
-    assert sent["output_config"]["format"]["type"] == "json_schema"
-    assert sent["fallbacks"] == "default" and sent["betas"] == ["server-side-fallback-2026-07-01"]
+# ---------------------------------------------------------------- more prompt forms
+def test_keyword_plan_like_artist_and_trending():
+    plan = keyword_plan("Indie bands like Alvvays but smaller, trending")
+    assert plan.similar_to == "Alvvays"
+    assert plan.genres == [] and plan.artist_type == "group"   # "indie" alone isn't a genre; Alvvays' genres fill in
+    assert plan.trending and plan.level == "smaller"
+    assert "Like Alvvays" in plan.chips() and "Rising" in plan.chips()
+    assert keyword_plan("I'd like R&B singers").similar_to == ""
 
 
-def test_plan_search_falls_back_on_refusal(monkeypatch):
-    fake = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(
-        create=lambda **kw: SimpleNamespace(stop_reason="refusal", content=[]))))
-    monkeypatch.setattr(ai, "_client", lambda: fake)
-    plan = ai.plan_search("female punk band")
-    assert plan.parsed_by == "keywords" and plan.gender == "female"
+def test_keyword_plan_spellings():
+    assert keyword_plan("rock n roll bands from Japan").genres == ["rock and roll"]
+    assert keyword_plan("rnb and hiphop").genres == ["r&b", "hip hop"]
+    assert keyword_plan("pop punk duo").genres == ["pop punk"]           # not "pop" + "punk"
+    assert keyword_plan("Chicago-based drill rappers").areas == ["Chicago"]
+    assert keyword_plan("female rappers").genres == ["hip hop"]
+
+
+def test_infer_genres_from_bio():
+    assert infer_genres("X", ["Atlanta-based alt R&B singer. Neo-soul vibes. Booking: x@y.com"]) == ["alternative r&b", "neo soul"]
 
 
 # ---------------------------------------------------------------- matching
@@ -125,6 +118,17 @@ class FakeMB:
         return {"id": "x", "name": name, "urls": [], "tags": [], "location": "", **self.PROFILES[name]}
 
 
+class FakeLastFm:
+    def __init__(self, http, key):
+        pass
+
+    def similar_scored(self, seed, limit=40):
+        return [("Echo Pals", .9)]
+
+    def tag_artists(self, tag, max_pages=40):
+        return iter([])
+
+
 class FakeFinder:
     def __init__(self, metrics=None):
         self.metrics = metrics or {}
@@ -141,10 +145,11 @@ def store(tmp_path):
 
 def test_search_job_keeps_only_matches(store, monkeypatch):
     monkeypatch.setattr(jobs, "MusicBrainz", FakeMB)
+    monkeypatch.setattr(jobs, "LastFm", FakeLastFm)
     plan = keyword_plan("female punk rock band")
-    plan.suggested_artists = ["Echo Pals"]
+    plan.similar_to = "Seed Band"   # its Last.fm neighbours come first
     search_id = store.create_search("female punk rock band", plan.to_dict())
-    runner = JobRunner(store, Settings(), finder_factory=lambda http: FakeFinder())
+    runner = JobRunner(store, Settings(lastfm_api_key="k"), finder_factory=lambda http: FakeFinder())
     job_id = runner.submit("search", {"search_id": search_id})
     runner.run(job_id)
     assert store.job(job_id)["status"] == "done", store.job(job_id)["message"]
@@ -153,6 +158,8 @@ def test_search_job_keeps_only_matches(store, monkeypatch):
     riot = next(r for r in store.search_results(search_id) if r["name"] == "Riot Kids")
     assert riot["gender"] == "female" and riot["artist_type"] == "group" and riot["genre_list"] == ["punk rock"]
     assert riot["match_reason"].startswith("Female · Band")
+    echo = next(r for r in store.search_results(search_id) if r["name"] == "Echo Pals")
+    assert echo["match_reason"].startswith("Like Seed Band")
 
 
 def test_recommend_job_makes_picks(store, monkeypatch):
@@ -184,5 +191,6 @@ def test_discover_page_and_search_api(store, monkeypatch):
     assert r.status_code == 302 and "/discover?s=" in r.headers["Location"]
     page = c.get(r.headers["Location"]).data.decode()
     assert "female punk rock band" in page and "Band / group" in page and "punk rock" in page
+    assert "anthropic" not in page.lower() and "claude" not in page.lower()
     data = c.get("/api/search/1").get_json()
     assert data["status"] == "queued" and data["count"] == 0

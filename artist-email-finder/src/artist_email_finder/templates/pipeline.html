@@ -32,25 +32,12 @@
   {% endfor %}
 </div>
 
-<div class="panel" style="margin-top:18px">
-  <div class="chart-head">
-    <h2>Where your leads sit</h2>
-    <div class="legend">
-      <span><i style="background:var(--series-1)"></i>your level</span>
-      <span><i style="background:var(--muted-mark)"></i>bigger / smaller</span>
-      <span><i class="band"></i>your range ({{ band_low|ratio }}–{{ band_high|ratio }})</span>
-    </div>
-  </div>
-  {% if points %}
-  <svg id="map" role="img" aria-label="Scatter of {{ points|length }} artists: engagement compared with yours against email confidence"></svg>
-  <p class="small muted" style="margin:6px 0 0">Left to right: engagement compared with yours. Bottom to top: how sure the email is. The best targets sit in the shaded band, near the top. Click a dot to open the artist.{% if unknown %} {{ unknown }} with unknown engagement not shown.{% endif %}</p>
-  {% else %}
-  <div class="empty" style="padding:30px">Artists show up here once their engagement is known{% if not has_level %} and you've set yours in <a href="{{ url_for('settings_page') }}">Settings</a>{% endif %}.</div>
-  {% endif %}
-</div>
+<a class="panel row" href="{{ url_for('galaxy') }}" style="margin-top:18px;color:var(--text)">
+  {{ ui.icon('galaxy', 'lg') }} <b>See everyone in the Galaxy</b> <span class="muted">· distance = level, brightness = momentum</span>
+  <span class="spacer"></span><span class="muted">→</span>
+</a>
 {% endblock %}
 {% block scripts %}
-<script id="points" type="application/json">{{ points|tojson }}</script>
 <script>
 document.body.dataset.refreshOnClose = '1';
 /* drag & drop between stages */
@@ -72,46 +59,5 @@ document.querySelectorAll('.col').forEach(col => {
   });
 });
 
-/* level map: x = engagement vs me (log, 1/32x..32x), y = email confidence */
-(function () {
-  const svg = document.getElementById('map');
-  if (!svg) return;
-  const pts = JSON.parse(document.getElementById('points').textContent);
-  const tip = document.getElementById('tip');
-  const NS = 'http://www.w3.org/2000/svg', SPAN = Math.log(32), BAND = [{{ band_low }}, {{ band_high }}];
-  const el = (n, a) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); svg.appendChild(e); return e; };
-  const fmt = r => r >= 10 ? r.toFixed(0) + '×' : r >= 1 ? r.toFixed(1) + '×' : r.toFixed(2) + '×';
-  function draw() {
-    svg.innerHTML = '';
-    const W = svg.clientWidth, H = svg.clientHeight, m = {l: 64, r: 14, t: 14, b: 26};
-    const iw = W - m.l - m.r, ih = H - m.t - m.b;
-    const x = r => m.l + Math.min(1, Math.max(0, (Math.log(r) / SPAN + 1) / 2)) * iw;
-    const y = s => m.t + ih - (s ? 14 + (s / 100) * (ih - 14) : 4);
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    el('rect', {class: 'bandrect', x: x(BAND[0]), y: m.t, width: x(BAND[1]) - x(BAND[0]), height: ih, rx: 6});
-    for (const [s, label] of [[100, 'certain'], [80, 'high'], [55, 'medium'], [0, 'no email']]) {
-      if (s) el('line', {class: 'grid', x1: m.l, x2: m.l + iw, y1: y(s), y2: y(s)});
-      el('text', {x: m.l - 8, y: y(s) + 4, 'text-anchor': 'end'}).textContent = label;
-    }
-    el('line', {class: 'you', x1: x(1), x2: x(1), y1: m.t, y2: m.t + ih});
-    for (const [r, label] of [[1/32, '1/32×'], [1/4, '¼×'], [1, 'you'], [4, '4×'], [32, '32×']])
-      el('text', {x: x(r), y: H - 8, 'text-anchor': r === 1/32 ? 'start' : r === 32 ? 'end' : 'middle'}).textContent = label;
-    for (const p of pts.slice().sort((a, b) => (a.bucket === 'match') - (b.bucket === 'match'))) {
-      const jitter = ((p.id * 2654435761) % 1000) / 1000 - .5;
-      const cy = y(p.score) + (p.score ? 0 : jitter * 6);
-      const c = el('circle', {class: 'dot ' + (p.bucket === 'match' ? 'in' : 'out'), cx: x(p.r), cy, r: 5});
-      const hit = el('circle', {cx: x(p.r), cy, r: 11, fill: 'transparent', style: 'cursor:pointer'});
-      hit.addEventListener('mouseenter', () => {
-        c.classList.add('hl');
-        tip.innerHTML = `<b>${App.esc(p.name)}</b><br>${fmt(p.r)} your engagement<br>${p.email ? App.esc(p.email) + ' · ' + App.esc(p.conf) : 'no email yet'}<br><span class="muted">${App.esc(p.status)}</span>`;
-        tip.style.display = 'block';
-      });
-      hit.addEventListener('mousemove', e => { tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; });
-      hit.addEventListener('mouseleave', () => { c.classList.remove('hl'); tip.style.display = 'none'; });
-      hit.addEventListener('click', () => App.openDrawer(p.id));
-    }
-  }
-  draw(); addEventListener('resize', draw);
-})();
 </script>
 {% endblock %}
