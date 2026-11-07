@@ -8,19 +8,20 @@
 <div class="grid2">
 <div>
 <form class="panel" method="post">
-  <h2>My level</h2>
-  <p class="small muted">Your own numbers. Each artist's size is compared with yours on every platform where both numbers are known. Fill in whichever you have; Instagram and Spotify matter most.</p>
+  <h2>My level (engagement)</h2>
+  <p class="small muted">How many people actually engage with your typical post, not your follower count. Each artist's engagement is compared with yours on the same platform. Fill in whichever platforms you're active on.</p>
   <div class="metric-grid">
-    {% for key, label in METRICS.items() %}
-    <div><label>{{ label }}</label><input type="text" name="my_{{ key }}" value="{{ s.get('my_' ~ key, '') }}" placeholder="e.g. 4.2K" style="width:100%"></div>
+    {% for key, label in ENGAGEMENT.items() %}
+    <div><label>{{ label }}</label><input type="text" name="my_{{ key }}" value="{{ s.get('my_' ~ key, '') }}" placeholder="e.g. 350" style="width:100%"></div>
     {% endfor %}
   </div>
+  <p class="small muted">Use typical numbers (ignore your one viral post). For Instagram: likes + comments on an average recent post. Easiest: use "Fill in automatically", or capture your own TikTok with the bookmarklet and press "This is me".</p>
   <h2 style="margin-top:18px">"Around my level" means</h2>
   <div class="row">
     from <input type="number" step="0.05" min="0.01" name="level_low" value="{{ s.level_low }}" style="width:80px">×
     to <input type="number" step="0.5" min="1" name="level_high" value="{{ s.level_high }}" style="width:80px">× my size
   </div>
-  <p class="small muted">Default 0.25× to 4×: if you have 5K followers, that's artists with about 1.25K to 20K.</p>
+  <p class="small muted">Default 0.25× to 4×: if your posts get about 400 likes + comments, that's artists getting about 100 to 1,600.</p>
 
   <h2 style="margin-top:18px">Email template</h2>
   <p class="small muted">Used by the "Email" button on an artist page. <code class="k">{artist}</code> and <code class="k">{first_name}</code> are filled in.</p>
@@ -32,13 +33,14 @@
 
 <div>
 <form class="panel" method="post" action="{{ url_for('autofill') }}">
-  <h2>Fill in my numbers automatically</h2>
+  <h2>Fill in my engagement automatically</h2>
   <label>My Instagram handle {% if not status['Instagram Business Discovery'] %}<span class="muted">(needs Meta keys)</span>{% endif %}</label>
   <input type="text" name="my_instagram" value="{{ s.get('my_instagram', '') }}" placeholder="@yourhandle" style="width:100%">
-  <label>My Spotify artist link {% if not status['Spotify (discovery, followers)'] %}<span class="muted">(needs Spotify keys)</span>{% endif %}</label>
-  <input type="text" name="my_spotify_url" value="{{ s.get('my_spotify_url', '') }}" placeholder="https://open.spotify.com/artist/..." style="width:100%">
-  <label>My Last.fm artist name {% if not status['Last.fm (discovery, listeners)'] %}<span class="muted">(needs Last.fm key)</span>{% endif %}</label>
-  <input type="text" name="my_lastfm_name" value="{{ s.get('my_lastfm_name', '') }}" style="width:100%">
+  <p class="small muted">Median likes + comments over your last 12 posts.</p>
+  <label>My YouTube channel link {% if not status['YouTube'] %}<span class="muted">(needs YouTube key)</span>{% endif %}</label>
+  <input type="text" name="my_youtube_url" value="{{ s.get('my_youtube_url', '') }}" placeholder="https://www.youtube.com/@you" style="width:100%">
+  <p class="small muted">Median views over your last 10 uploads.</p>
+  <p class="small"><b>TikTok:</b> open your own TikTok profile, click the <b>Capture artist</b> bookmarklet, then press <b>This is me</b>.</p>
   <div style="margin-top:12px"><button>Fetch my numbers</button></div>
 </form>
 
@@ -49,7 +51,7 @@
   <ol class="small">
     <li>Open an artist's Instagram or TikTok profile in your browser (logged in as normal).</li>
     <li>Click <b>Capture artist</b> in your bookmarks bar.</li>
-    <li>A tab opens here with their bio email, follower count, and their size compared with yours. If the bio has a Linktree or website, it's checked automatically.</li>
+    <li>A tab opens here with their bio email and, on TikTok, their typical views per video compared with yours. If the bio has a Linktree or website, it's checked automatically.</li>
   </ol>
   <p class="small muted">It only reads the page you're looking at. It also works on Linktree pages and artist websites. Keep this app running while you browse.</p>
 </div>

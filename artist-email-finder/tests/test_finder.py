@@ -70,7 +70,8 @@ class FakeGraph:
 
     def find(self, handle):
         self.calls.append(handle)
-        return ([], {"instagram_followers": 9100, "website": "https://linktr.ee/lilnova"})
+        return ([], {"instagram_followers": 9100, "instagram_engagement": 410,
+                     "website": "https://linktr.ee/lilnova"})
 
 
 def test_finder_instagram_and_tiktok_paths():
@@ -84,7 +85,49 @@ def test_finder_instagram_and_tiktok_paths():
     assert finder.instagram.calls == ["lilnova"]
     assert "https://linktr.ee/lilnova" in http.fetched
     assert result.instagram == "lilnova" and result.tiktok == "lilnova"
-    assert result.metrics == {"instagram_followers": 9100, "tiktok_followers": 40000}
+    assert result.metrics == {"instagram_followers": 9100, "instagram_engagement": 410,
+                              "tiktok_followers": 40000}
     assert [e.email for e in result.emails] == ["booking@lilnova.com", "nova@team.co"]
     # Instagram/TikTok pages themselves are never fetched directly.
     assert not any("instagram.com" in u or "tiktok.com" in u for u in http.fetched)
+
+
+class GraphHttp:
+    def get_json(self, url, params=None, **kw):
+        assert "media.limit(12){like_count,comments_count" in params["fields"]
+        return {"business_discovery": {
+            "biography": "booking: hi@nova.co", "followers_count": 20000, "website": "",
+            "media": {"data": [
+                {"like_count": 300, "comments_count": 20}, {"like_count": 280, "comments_count": 10},
+                {"comments_count": 5},  # likes hidden: ignored
+                {"like_count": 9000, "comments_count": 400}, {"like_count": 350, "comments_count": 15},
+            ]}}}
+
+
+def test_instagram_engagement_is_median_of_recent_posts():
+    from artist_email_finder.sources.instagram import InstagramGraph
+    findings, info = InstagramGraph(GraphHttp(), "tok", "123").find("lilnova")
+    assert [f.email for f in findings] == ["hi@nova.co"]
+    assert info["instagram_followers"] == 20000
+    assert info["instagram_engagement"] == 342   # median of 290, 320, 365, 9400
+
+
+class YtHttp:
+    def get_json(self, url, params=None, **kw):
+        if url.endswith("/channels"):
+            return {"items": [{"id": "UC1", "snippet": {"description": ""},
+                               "contentDetails": {"relatedPlaylists": {"uploads": "UU1"}},
+                               "statistics": {"subscriberCount": "5000"}}]}
+        if url.endswith("/playlistItems"):
+            return {"items": [{"snippet": {"resourceId": {"videoId": f"v{i}"}, "description": ""}}
+                              for i in range(4)]}
+        if url.endswith("/videos"):
+            assert params["id"] == "v0,v1,v2,v3"
+            return {"items": [{"statistics": {"viewCount": n}} for n in ("1200", "900", "40000", "1500")]}
+        raise AssertionError(url)
+
+
+def test_youtube_typical_views():
+    from artist_email_finder.sources.youtube import YouTube
+    _, info = YouTube(YtHttp(), "key").find("Lil Nova", ["https://www.youtube.com/@lilnova"])
+    assert info["subscribers"] == 5000 and info["views"] == 1350

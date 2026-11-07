@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .config import Settings, load_dotenv
 from .finder import Finder, normalize_link
+from .level import METRICS
 from .net import DEFAULT_USER_AGENT, HttpClient
 from .models import Artist, ArtistResult
 from .sources.musicbrainz import MusicBrainz
@@ -24,7 +25,8 @@ from .sources.spotify import Spotify
 
 OUTPUT_FIELDS = [
     "artist", "email", "confidence", "score", "sources", "found_on", "context",
-    "instagram", "tiktok", "instagram_followers", "tiktok_followers", "spotify_followers",
+    "instagram", "tiktok", "instagram_engagement", "tiktok_views", "youtube_views",
+    "instagram_followers", "tiktok_followers", "spotify_followers",
     "lastfm_listeners", "youtube_subscribers", "genres", "location", "spotify_url",
     "discovered_via", "pages_checked",
 ]
@@ -80,9 +82,7 @@ def rows_for(result: ArtistResult, min_confidence: str) -> list[dict]:
         "genres": "; ".join(a.genres),
         "instagram": result.instagram,
         "tiktok": result.tiktok,
-        **{k: {**a.metrics, **result.metrics}.get(k, "") for k in (
-            "instagram_followers", "tiktok_followers", "spotify_followers",
-            "lastfm_listeners", "youtube_subscribers")},
+        **{k: {**a.metrics, **result.metrics}.get(k, "") for k in METRICS},
         "location": a.location,
         "spotify_url": a.spotify_url,
         "discovered_via": a.discovered_via or "input",

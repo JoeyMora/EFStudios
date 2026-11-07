@@ -2,7 +2,7 @@
 
 Business Discovery lets *your* Instagram business/creator account read the
 public profile of any other business or creator account: bio, website,
-follower count. It doesn't work for personal accounts, and it doesn't return
+follower count, and like/comment counts on recent posts (engagement). It doesn't work for personal accounts, and it doesn't return
 the in-app "Email" button. Many artists put the email in the bio or behind the
 website link (usually a Linktree), and this API returns both.
 
@@ -16,6 +16,7 @@ import logging
 import re
 from urllib.parse import urlparse
 
+from ..level import typical
 from ..extract import context_for, emails_from_text
 from ..net import HttpClient
 from ..models import Finding
@@ -59,13 +60,15 @@ class InstagramGraph:
     def profile(self, handle: str) -> dict | None:
         """Public profile of a business/creator account, or None."""
         fields = ("business_discovery.username({u}){{username,name,biography,website,"
-                  "followers_count,media_count}}").format(u=handle)
+                  "followers_count,media_count,"
+                  "media.limit(12){{like_count,comments_count,timestamp,media_type}}}}").format(u=handle)
         data = self.http.get_json(f"{self.base}/{self.ig_user_id}",
                                   params={"fields": fields, "access_token": self.access_token})
         return (data or {}).get("business_discovery")
 
     def find(self, handle: str) -> tuple[list[Finding], dict]:
-        """(findings, info) where info has followers, website, bio."""
+        """(findings, info): info has instagram_followers, instagram_engagement
+        (median likes+comments over the last 12 posts), website and bio."""
         prof = self.profile(handle)
         if not prof:
             return [], {}
@@ -73,8 +76,13 @@ class InstagramGraph:
         bio = prof.get("biography") or ""
         findings = [Finding(e, "social_bio", url, context_for(e, bio))
                     for e in emails_from_text(bio)]
+        posts = ((prof.get("media") or {}).get("data")) or []
+        # Posts with hidden like counts don't return like_count; leave them out.
+        per_post = [p["like_count"] + p.get("comments_count", 0)
+                    for p in posts if p.get("like_count") is not None]
         info = {
             "instagram_followers": prof.get("followers_count"),
+            "instagram_engagement": typical(per_post),
             "website": prof.get("website") or "",
             "bio": bio,
             "name": prof.get("name") or "",

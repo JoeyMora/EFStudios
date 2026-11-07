@@ -4,7 +4,7 @@
 <h1>Find artists</h1>
 <p class="muted">New artists land in <a href="{{ url_for('leads') }}">Leads</a>. Artists already in your list are skipped.</p>
 {% if not has_level %}
-<div class="notice">Tip: set your follower counts in <a href="{{ url_for('settings_page') }}">My level</a>. Then "Only artists around my level" skips anyone much bigger or smaller than you.</div>
+<div class="notice">Tip: set your engagement in <a href="{{ url_for('settings_page') }}">My level</a>. Then "Only artists around my level" keeps only artists whose posts get engagement close to yours.</div>
 {% endif %}
 
 <div class="grid2">
@@ -21,12 +21,14 @@
   <div id="f-seed"><label>Similar to (an artist around your level, or one of your clients)</label><input type="text" name="seed" placeholder="Artist name" style="width:100%"></div>
   <div id="f-area"><label>City / region / country</label><input type="text" name="area" placeholder="e.g. Atlanta" style="width:100%"></div>
   <label>How many to add</label><input type="number" name="limit" value="25" min="1" max="500">
+  <label>Skip artists with more than … Spotify followers (optional, speeds things up)</label>
+  <input type="number" name="max_spotify_followers" placeholder="e.g. 100000" min="0">
   <div style="margin-top:12px">
     <label class="inline"><input type="checkbox" name="only_my_level" {% if has_level %}checked{% else %}disabled{% endif %}> Only artists around my level{% if not has_level %} <span class="muted">(set My level first)</span>{% endif %}</label><br>
     <label class="inline" style="margin-top:6px"><input type="checkbox" name="find_emails" checked> Find emails now</label>
   </div>
   <div style="margin-top:14px"><button class="primary">Start</button></div>
-  <p class="small muted">Spotify lists the most popular artists first. With "around my level" on, it digs deeper to reach artists your size, which takes longer.</p>
+  <p class="small muted">Engagement comes from each artist's Instagram posts (Meta keys) and YouTube views (YouTube key), so "around my level" needs at least one of those. Artists whose engagement can't be measured are kept and shown as "?". Spotify lists the most popular artists first, so the follower cap saves time on superstars.</p>
 </form>
 
 <form class="panel" method="post" action="{{ url_for('lookup') }}">

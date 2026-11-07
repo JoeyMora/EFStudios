@@ -16,7 +16,7 @@
 </div>
 
 {% if not has_level %}
-<div class="notice">Set your own follower counts in <a href="{{ url_for('settings_page') }}">My level</a> to see which artists are around your size.</div>
+<div class="notice">Set your engagement in <a href="{{ url_for('settings_page') }}">My level</a> to see which artists are around your level.</div>
 {% endif %}
 
 <form class="panel filters" method="get">
@@ -27,12 +27,12 @@
     {% for s in STATUSES %}<option value="{{ s }}" {% if f.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}
   </select>
   <select name="level">
-    <option value="" {% if f.level == '' %}selected{% endif %}>Any size</option>
+    <option value="" {% if f.level == '' %}selected{% endif %}>Any level</option>
     <option value="match+unknown" {% if f.level == 'match+unknown' %}selected{% endif %}>My level + unknown</option>
     <option value="match" {% if f.level == 'match' %}selected{% endif %}>My level</option>
     <option value="bigger" {% if f.level == 'bigger' %}selected{% endif %}>Bigger than my range</option>
     <option value="smaller" {% if f.level == 'smaller' %}selected{% endif %}>Smaller than my range</option>
-    <option value="unknown" {% if f.level == 'unknown' %}selected{% endif %}>Size unknown</option>
+    <option value="unknown" {% if f.level == 'unknown' %}selected{% endif %}>Engagement unknown</option>
   </select>
   <select name="has_email">
     <option value="">Email: any</option>
@@ -46,12 +46,12 @@
   </select>
   <input type="text" name="genre" value="{{ f.genre }}" placeholder="Genre" size="10">
   <select name="sort">
-    <option value="level" {% if f.sort == 'level' %}selected{% endif %}>Closest to my size</option>
+    <option value="level" {% if f.sort == 'level' %}selected{% endif %}>Closest to my engagement</option>
     <option value="email" {% if f.sort == 'email' %}selected{% endif %}>Best email first</option>
     <option value="newest" {% if f.sort == 'newest' %}selected{% endif %}>Newest</option>
     <option value="updated" {% if f.sort == 'updated' %}selected{% endif %}>Recently updated</option>
-    <option value="biggest" {% if f.sort == 'biggest' %}selected{% endif %}>Biggest</option>
-    <option value="smallest" {% if f.sort == 'smallest' %}selected{% endif %}>Smallest</option>
+    <option value="biggest" {% if f.sort == 'biggest' %}selected{% endif %}>Most engagement</option>
+    <option value="smallest" {% if f.sort == 'smallest' %}selected{% endif %}>Least engagement</option>
     <option value="name" {% if f.sort == 'name' %}selected{% endif %}>Name</option>
   </select>
   <label class="inline"><input type="checkbox" name="starred" value="1" {% if f.starred == '1' %}checked{% endif %}> Starred</label>
@@ -68,10 +68,10 @@
     <th><input type="checkbox" id="all"></th>
     <th></th>
     <th>Artist</th>
-    <th>Size vs you</th>
-    <th class="hide-sm">IG</th>
-    <th class="hide-sm">TikTok</th>
-    <th class="hide-sm">Spotify</th>
+    <th>Engagement vs you</th>
+    <th class="hide-sm" title="Median likes + comments per post (engagement rate)">IG / post</th>
+    <th class="hide-sm" title="Median views per video">TikTok / video</th>
+    <th class="hide-sm" title="Median views per video">YouTube / video</th>
     <th>Best email</th>
     <th>Status</th>
     <th class="hide-sm">Links</th>
@@ -87,9 +87,9 @@
       <div class="sub">{{ l.genres or l.discovered_via }}{% if l.location %} · {{ l.location }}{% endif %}</div>
     </td>
     <td><span class="badge lvl-{{ l.level_bucket }}">{{ l.level_ratio|ratio }}{% if l.level_bucket != 'unknown' %} · {{ {'match': 'your level', 'bigger': 'bigger', 'smaller': 'smaller'}[l.level_bucket] }}{% endif %}</span></td>
-    <td class="hide-sm">{{ l.metrics.get('instagram_followers')|compact }}</td>
-    <td class="hide-sm">{{ l.metrics.get('tiktok_followers')|compact }}</td>
-    <td class="hide-sm">{{ l.metrics.get('spotify_followers')|compact }}</td>
+    <td class="hide-sm">{{ l.metrics.get('instagram_engagement')|compact }}{% set er = l.metrics|eng_rate %}{% if er is not none %} <span class="small {{ 'badge conf-low' if er < 1 else 'muted' }}" title="engagement rate: of {{ l.metrics.instagram_followers|compact }} followers{{ ' (low: followers may be inflated)' if er < 1 else '' }}">{{ '%.1f'|format(er) }}%</span>{% elif l.metrics.get('instagram_followers') %}<span class="small muted" title="followers">{{ l.metrics.instagram_followers|compact }} fol.</span>{% endif %}</td>
+    <td class="hide-sm">{{ l.metrics.get('tiktok_views')|compact }}{% if not l.metrics.get('tiktok_views') and l.metrics.get('tiktok_followers') %}<span class="small muted">{{ l.metrics.tiktok_followers|compact }} fol.</span>{% endif %}</td>
+    <td class="hide-sm">{{ l.metrics.get('youtube_views')|compact }}</td>
     <td>
       {% if l.best_email %}
         <span class="email">{{ l.best_email }}</span>
@@ -111,7 +111,7 @@
   </tr>
   {% else %}
   <tr><td colspan="10" class="muted" style="padding:30px;text-align:center">
-    No artists match. <a href="{{ url_for('find') }}">Find some artists</a>{% if f.level %} or set the size filter to "Any size"{% endif %}.
+    No artists match. <a href="{{ url_for('find') }}">Find some artists</a>{% if f.level %} or set the level filter to "Any level"{% endif %}.
   </td></tr>
   {% endfor %}
   </tbody>

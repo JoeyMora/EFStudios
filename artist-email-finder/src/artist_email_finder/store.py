@@ -11,7 +11,7 @@ import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
-from .level import METRICS, bucket, ratio
+from .level import ENGAGEMENT, bucket, ratio
 from .models import Artist, ArtistResult, EmailResult
 from .scoring import label
 
@@ -125,7 +125,7 @@ class Store:
     def my_metrics(self) -> dict[str, int]:
         s = self.settings()
         out = {}
-        for key in METRICS:
+        for key in ENGAGEMENT:
             value = (s.get(f"my_{key}") or "").replace(",", "").strip()
             if value.isdigit() and int(value) > 0:
                 out[key] = int(value)

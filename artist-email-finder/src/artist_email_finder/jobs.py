@@ -14,7 +14,6 @@ from typing import Iterator
 
 from .config import Settings
 from .finder import Finder
-from .level import ratio
 from .models import Artist
 from .net import HttpClient
 from .sources.lastfm import LastFm
@@ -133,8 +132,6 @@ class JobRunner:
             if not s.has_spotify:
                 raise RuntimeError("Spotify keys are not set (SPOTIFY_CLIENT_ID / SECRET)")
             sp = Spotify(http, s.spotify_client_id, s.spotify_client_secret)
-            # With my Spotify followers set, Spotify results already carry the
-            # number needed for level filtering.
             return sp.discover(genre, market=params.get("market") or "US")
         if source == "lastfm":
             if not s.lastfm_api_key:
@@ -148,31 +145,22 @@ class JobRunner:
             return MusicBrainz(http).discover(genre=genre, area=area)
         raise ValueError(f"unknown source {source!r}")
 
-    def _quick_metrics(self, artist: Artist, http: HttpClient) -> None:
-        """Cheap size numbers (one API call) so we can skip far-off artists
-        before spending a full email lookup on them."""
-        mine = self.store.my_metrics()
-        if ratio(artist.metrics, mine) is not None:
-            return
-        s = self.settings
-        if "lastfm_listeners" in mine and s.lastfm_api_key:
-            info = LastFm(http, s.lastfm_api_key).info(artist.name)
-            if info.get("listeners") is not None:
-                artist.metrics["lastfm_listeners"] = info["listeners"]
-                if not artist.genres:
-                    artist.genres = info["tags"][:5]
-        if "spotify_followers" in mine and s.has_spotify and ratio(artist.metrics, mine) is None:
-            sp = Spotify(http, s.spotify_client_id, s.spotify_client_secret).lookup(artist.name)
-            if sp:
-                artist.metrics.update(sp.metrics)
-                artist.spotify_url = artist.spotify_url or sp.spotify_url
+    def _too_big(self, artist: Artist, cap: int | None, http: HttpClient) -> bool:
+        """Optional speed-up: skip obvious superstars before the full lookup.
+        Uses the Spotify follower count when discovery already has it (free)."""
+        if not cap:
+            return False
+        n = artist.metrics.get("spotify_followers")
+        return n is not None and n > cap
 
     def _discover(self, job_id: int, params: dict, http: HttpClient) -> str:
         limit = int(params.get("limit") or 25)
         only_level = bool(params.get("only_my_level"))
         find_emails = bool(params.get("find_emails", True))
         max_scan = int(params.get("max_scan") or max(200, limit * 20))
-        finder = self.finder_factory(http) if find_emails else None
+        finder = self.finder_factory(http) if (find_emails or only_level) else None
+        cap = int(params["max_spotify_followers"]) if params.get("max_spotify_followers") else None
+        too_big = 0
 
         kept = scanned = skipped_known = off_level = 0
         self.store.update_job(job_id, total=limit, message="searching...")
@@ -186,16 +174,14 @@ class JobRunner:
             scanned += 1
             self.store.update_job(job_id, message=f"checking {artist.name} "
                                                   f"({scanned} looked at, {off_level} off your level)")
-            if only_level:
-                self._quick_metrics(artist, http)
-                _, b = self.store.level_of(artist.metrics)
-                if b in ("smaller", "bigger"):
-                    off_level += 1
-                    self.store.save_artist(artist)  # remembered, so it isn't re-checked
-                    continue
+            if self._too_big(artist, cap, http):
+                too_big += 1
+                self.store.save_artist(artist)  # remembered, so it isn't re-checked
+                continue
             result = finder.lookup(artist) if finder else None
             self.store.save_artist(artist, result)
             if only_level and result:
+                # Engagement comes from the lookup (Instagram posts, YouTube views).
                 _, b = self.store.level_of({**artist.metrics, **result.metrics})
                 if b in ("smaller", "bigger"):
                     off_level += 1
@@ -206,7 +192,9 @@ class JobRunner:
                 break
         parts = [f"added {kept} artists"]
         if only_level:
-            parts.append(f"{off_level} skipped as off your level")
+            parts.append(f"{off_level} off your engagement level")
+        if too_big:
+            parts.append(f"{too_big} over the Spotify follower cap")
         if skipped_known:
             parts.append(f"{skipped_known} already in your list")
         return ", ".join(parts)

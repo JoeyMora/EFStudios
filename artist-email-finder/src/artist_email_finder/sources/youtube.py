@@ -12,6 +12,7 @@ import logging
 import re
 from urllib.parse import urlparse
 
+from ..level import typical
 from ..extract import context_for, emails_from_text
 from ..net import HttpClient
 from ..models import Finding
@@ -72,7 +73,8 @@ class YouTube:
         return items[0] if items else None
 
     def find(self, artist_name: str, links: list[str]) -> tuple[list[Finding], dict]:
-        """(findings, info) where info has "url" and "subscribers"."""
+        """(findings, info) where info has "url", "subscribers" and "views"
+        (median views over the last 10 uploads)."""
         channel = None
         for link in links:
             channel = self.channel_from_url(link)
@@ -90,10 +92,13 @@ class YouTube:
             findings.append(Finding(email, "youtube", channel_url, context_for(email, description)))
 
         uploads = ((channel.get("contentDetails") or {}).get("relatedPlaylists") or {}).get("uploads")
-        if uploads and self.videos_to_scan:
+        video_ids: list[str] = []
+        if uploads:
             data = self._get("playlistItems", part="snippet", playlistId=uploads,
-                             maxResults=self.videos_to_scan)
-            for item in (data or {}).get("items") or []:
+                             maxResults=max(self.videos_to_scan, 10))
+            items = (data or {}).get("items") or []
+            video_ids = [(i["snippet"].get("resourceId") or {}).get("videoId", "") for i in items]
+            for item in items[:self.videos_to_scan]:
                 snippet = item["snippet"]
                 video_id = (snippet.get("resourceId") or {}).get("videoId", "")
                 video_url = f"https://www.youtube.com/watch?v={video_id}"
@@ -102,4 +107,27 @@ class YouTube:
                     findings.append(Finding(email, "youtube", video_url, context_for(email, text)))
         stats = channel.get("statistics") or {}
         subs = None if stats.get("hiddenSubscriberCount") else stats.get("subscriberCount")
-        return findings, {"url": channel_url, "subscribers": int(subs) if subs else None}
+        return findings, {"url": channel_url, "subscribers": int(subs) if subs else None,
+                          "views": self.typical_views([v for v in video_ids if v])}
+
+    def typical_views(self, video_ids: list[str]) -> int | None:
+        """Median views over recent uploads (1 quota unit)."""
+        if not video_ids:
+            return None
+        data = self._get("videos", part="statistics", id=",".join(video_ids[:10]))
+        return typical(int(v["statistics"]["viewCount"])
+                       for v in (data or {}).get("items") or []
+                       if (v.get("statistics") or {}).get("viewCount") is not None)
+
+    def channel_info(self, url: str) -> dict:
+        """Subscribers and typical views for a channel link (used for "my level")."""
+        channel = self.channel_from_url(url)
+        if not channel:
+            return {}
+        uploads = ((channel.get("contentDetails") or {}).get("relatedPlaylists") or {}).get("uploads")
+        ids = []
+        if uploads:
+            data = self._get("playlistItems", part="snippet", playlistId=uploads, maxResults=10)
+            ids = [(i["snippet"].get("resourceId") or {}).get("videoId", "")
+                   for i in (data or {}).get("items") or []]
+        return {"views": self.typical_views([i for i in ids if i])}

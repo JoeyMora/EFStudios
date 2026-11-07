@@ -12,15 +12,15 @@ from artist_email_finder.web import bookmarklet, create_app, ingest_capture
 @pytest.fixture
 def store(tmp_path):
     s = Store(tmp_path / "leads.db")
-    s.save_settings({"my_instagram_followers": "5000"})
+    s.save_settings({"my_instagram_engagement": "400", "my_tiktok_views": "3000"})
     return s
 
 
 def test_store_merges_and_levels(store):
-    a = Artist(name="Lil Nova", metrics={"instagram_followers": 10_000})
+    a = Artist(name="Lil Nova", metrics={"instagram_followers": 10_000, "instagram_engagement": 800})
     lead_id = store.save_artist(a)
     store.update_lead(lead_id, status="shortlist", notes="great hooks")
-    result = ArtistResult(artist=a, instagram="LilNova", metrics={"instagram_followers": 12_000},
+    result = ArtistResult(artist=a, instagram="LilNova", metrics={"instagram_engagement": 960},
                           emails=[EmailResult("booking@lilnova.com", 85, "high", ["website"], ["u"])])
     assert store.save_artist(Artist(name="lil nova"), result) == lead_id
     lead = store.lead(lead_id)
@@ -29,13 +29,16 @@ def test_store_merges_and_levels(store):
     assert lead["best_email"] == "booking@lilnova.com"
     assert lead["level_bucket"] == "match" and round(lead["level_ratio"], 1) == 2.4
 
-    store.save_artist(Artist(name="Megastar", metrics={"instagram_followers": 5_000_000}))
+    store.save_artist(Artist(name="Megastar", metrics={"instagram_engagement": 90_000}))
+    # Lots of followers but little engagement: still my level.
+    store.save_artist(Artist(name="Inflated", metrics={"instagram_followers": 900_000,
+                                                       "instagram_engagement": 300}))
     rows, total = store.leads(level="match")
-    assert [r["name"] for r in rows] == ["Lil Nova"]
+    assert sorted(r["name"] for r in rows) == ["Inflated", "Lil Nova"]
     rows, _ = store.leads(level="bigger")
     assert [r["name"] for r in rows] == ["Megastar"]
     # Changing my numbers re-buckets everyone.
-    store.save_settings({"my_instagram_followers": "2000000"})
+    store.save_settings({"my_instagram_engagement": "50000"})
     assert store.lead(lead_id)["level_bucket"] == "smaller"
 
 
@@ -49,12 +52,17 @@ def test_capture_instagram(store):
     lead = store.lead(lead_id)
     assert lead["name"] == "Lil Nova" and lead["instagram"] == "lilnova"
     assert "https://linktr.ee/lilnova" in lead["links"]
-    assert lead["level_bucket"] == "match"
+    assert lead["level_bucket"] == "unknown"  # followers alone don't set the level
     # Capturing TikTok for the same name merges into the same lead.
     lead2, _, _ = ingest_capture(store, "https://www.tiktok.com/@lilnova.music",
-                                 "Lil Nova (@lilnova.music) | TikTok", "45.1K Followers")
+                                 "Lil Nova (@lilnova.music) | TikTok",
+                                 "45.1K Followers\nVIDEO_VIEWS: 2.1K | 3.4K | 1.8K | 250K | 2.9K")
     assert lead2 == lead_id
-    assert store.lead(lead_id)["metrics"]["tiktok_followers"] == 45_100
+    lead = store.lead(lead_id)
+    assert lead["metrics"]["tiktok_followers"] == 45_100
+    assert lead["metrics"]["tiktok_views"] == 2900          # median, viral video ignored
+    assert lead["level_bucket"] == "match" and round(lead["level_ratio"], 2) == 0.97
+    assert "VIDEO_VIEWS" not in str(lead["links"])
 
 
 def test_web_pages(tmp_path):
@@ -74,9 +82,12 @@ def test_web_pages(tmp_path):
     lead = store.lead(lead_id)
     assert lead["best_email"] == "nova@mgmt.co" and lead["metrics"]["instagram_followers"] == 3100
 
-    c.post("/settings", data={"my_instagram_followers": "3K", "level_low": "0.5", "level_high": "2",
+    c.post(f"/lead/{lead_id}", data={"instagram_engagement": "250"})
+    c.post("/settings", data={"my_instagram_engagement": "300", "level_low": "0.5", "level_high": "2",
                               "email_subject": "Hi {artist}", "email_body": "Yo {first_name}"})
+    assert store.my_metrics() == {"instagram_engagement": 300}
     assert store.lead(lead_id)["level_bucket"] == "match"
+    assert "8.1%" in c.get("/?level=").data.decode()   # 250 / 3,100 followers
     page = c.get(f"/lead/{lead_id}").data.decode()
     assert "mailto:nova@mgmt.co?subject=Hi%20Lil%20Nova&amp;body=Yo%20Lil" in page
 
@@ -102,23 +113,39 @@ class FakeFinder:
 def test_discover_job_keeps_only_my_level(store, monkeypatch):
     candidates = [
         Artist("Huge", metrics={"spotify_followers": 9_000_000}, discovered_via="spotify"),
+        Artist("BigButQuiet", metrics={"spotify_followers": 80_000}, discovered_via="spotify"),
         Artist("Peer", discovered_via="spotify"),
         Artist("Tiny", discovered_via="spotify"),
         Artist("Peer2", discovered_via="spotify"),
     ]
-    store.save_settings({"my_spotify_followers": "2000"})
-    finder = FakeFinder({"Peer": {"instagram_followers": 6000}, "Tiny": {"instagram_followers": 10},
-                         "Peer2": {"spotify_followers": 1500}})
+    finder = FakeFinder({"BigButQuiet": {"instagram_engagement": 350},
+                         "Peer": {"tiktok_views": 5000}, "Tiny": {"instagram_engagement": 4},
+                         "Peer2": {"instagram_engagement": 900}})
     runner = JobRunner(store, Settings(), finder_factory=lambda http: finder)
     monkeypatch.setattr(runner, "_candidates", lambda params, http: iter(candidates))
-    job_id = runner.submit("discover", {"source": "spotify", "genre": "trap", "limit": 2,
-                                        "only_my_level": True, "find_emails": True})
+    job_id = runner.submit("discover", {"source": "spotify", "genre": "trap", "limit": 3,
+                                        "only_my_level": True, "find_emails": True,
+                                        "max_spotify_followers": 1_000_000})
     runner.run(job_id)
     job = store.job(job_id)
     assert job["status"] == "done", job["message"]
-    assert job["progress"] == 2
+    assert job["progress"] == 3
     rows, _ = store.leads(level="match")
-    assert sorted(r["name"] for r in rows) == ["Peer", "Peer2"]
-    # Huge was skipped before the email lookup; Tiny after it. Both are remembered.
+    assert sorted(r["name"] for r in rows) == ["BigButQuiet", "Peer", "Peer2"]
+    # Huge was skipped by the follower cap before the lookup; Tiny after it
+    # (engagement too low). Both are remembered so they aren't re-checked.
     assert store.lead(store.find_lead(name="Huge")["id"])["best_email"] == ""
     assert store.has_lead("Tiny")
+
+
+def test_capture_me_sets_my_level(tmp_path):
+    app = create_app(str(tmp_path / "leads.db"), Settings(), start_jobs=False)
+    store, c = app.config["store"], app.test_client()
+    r = c.get("/capture", query_string={
+        "url": "https://www.tiktok.com/@joeymora", "title": "Joey (@joeymora) | TikTok",
+        "text": "1.2K Followers\nVIDEO_VIEWS: 800 | 1.1K | 950"})
+    assert b"This is me" in r.data
+    lead_id = store.find_lead(tiktok="joeymora")["id"]
+    c.post("/capture/me", data={"lead_id": lead_id})
+    assert store.my_metrics() == {"tiktok_views": 950}
+    assert store.lead(lead_id) is None

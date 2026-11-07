@@ -1,9 +1,9 @@
 # EF Studios Artist Finder
 
-Finds artists around your size to reach out to, along with their public booking or management emails. You work through them in a local web app.
+Finds artists at your engagement level to reach out to, along with their public booking or management emails. You work through them in a local web app.
 
 - **Find artists:** by genre (Spotify, Last.fm, MusicBrainz), by city (MusicBrainz), or "similar to" an artist you name (Last.fm). You can also paste a list of artists you already know.
-- **"Around my level":** enter your own follower counts. Every artist gets a size compared with yours (for example, `1.8×`), and discovery can skip anyone far bigger or smaller.
+- **"Around my level", based on engagement:** enter how much engagement your typical post gets. Every artist's typical post is compared with yours (for example, `1.8×`), and discovery keeps only artists in your range. Follower counts are shown for context but never used for level.
 - **Find emails:** from their website, Linktree-style pages, Instagram and TikTok (see below), YouTube descriptions and web search. Each email gets a confidence rating.
 - **Work through leads:** filter and sort, star artists, set a status (New → Shortlist → Contacted → Replied / Not a fit), keep notes, copy an email, open a pre-filled email from your template, and export to CSV.
 
@@ -19,17 +19,17 @@ artist-email-finder serve
 
 This opens http://127.0.0.1:5005. Your leads are saved in `leads.db` in the folder you run it from.
 
-1. **My level & settings:** enter your Instagram, Spotify and TikTok numbers, or fetch them automatically. Then edit your email template.
+1. **My level & settings:** enter your typical engagement, or fill it in automatically (see below). Then edit your email template.
 2. **Find artists:** pick a source and genre, keep "Only artists around my level" ticked, and press Start. Progress shows in the top bar.
-3. **Leads:** go through the list, closest to your size first.
+3. **Leads:** go through the list, closest to your engagement first.
 
 ## Instagram & TikTok
 
 Instagram and TikTok block automated access to profile pages, and getting around that would risk a ban on your accounts. The tool uses three approaches that stay within the rules instead.
 
-1. **Instagram Business Discovery (official Meta API).** Your Instagram business or creator account can look up any other business or creator account's bio, website link and follower count. Most artists who take bookings use one of those account types. The bio's website, usually a Linktree, is then checked for an email. The API doesn't expose the in-app "Email" button, and it doesn't work for personal accounts.
+1. **Instagram Business Discovery (official Meta API).** Your Instagram business or creator account can look up any other business or creator account's bio, website link, follower count and like/comment counts on recent posts. Most artists who take bookings use one of those account types. The bio's website, usually a Linktree, is then checked for an email. The API doesn't expose the in-app "Email" button, and it doesn't work for personal accounts.
 2. **Search-engine snippets.** Google and Brave index public Instagram and TikTok profiles. The tool reads the snippet ("12K Followers … bookings: …") to get follower counts, bio emails and handles. This needs a Brave or SerpAPI key.
-3. **Capture bookmarklet (you browse, it reads).** Drag **Capture artist** from the Settings page to your bookmarks bar. While you're on an artist's Instagram or TikTok profile, click it. Their bio email, follower count and size compared with yours are saved to your leads. Any Linktree or website in their bio is then checked automatically. It only reads the page you're already looking at. It also works on Linktree pages and websites.
+3. **Capture bookmarklet (you browse, it reads).** Drag **Capture artist** from the Settings page to your bookmarks bar. While you're on an artist's Instagram or TikTok profile, click it. Their bio email, follower count and (on TikTok) typical views per video are saved to your leads. Any Linktree or website in their bio is then checked automatically. It only reads the page you're already looking at. It also works on Linktree pages and websites.
 
 You can also paste a bio into an artist's page (**Paste a bio**), or add an email you saw in the Instagram app's Email button by hand.
 
@@ -48,21 +48,38 @@ The limit is about 200 lookups per hour. When the token expires, lookups quietly
 
 | Key | Unlocks | Where |
 |---|---|---|
-| `META_ACCESS_TOKEN`, `IG_USER_ID` | Instagram bio, website and followers | see above |
+| `META_ACCESS_TOKEN`, `IG_USER_ID` | Instagram engagement (likes + comments per post), bio, website, followers | see above |
 | `BRAVE_API_KEY` or `SERPAPI_API_KEY` | Web search for emails, plus Instagram/TikTok profile snippets | brave.com/search/api, serpapi.com |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | Discover by genre, Spotify followers | developer.spotify.com/dashboard |
 | `LASTFM_API_KEY` | Discover by tag or "similar to", listener counts | last.fm/api/account/create |
-| `YOUTUBE_API_KEY` | Emails in YouTube channel and video descriptions, subscriber counts | Google Cloud Console → YouTube Data API v3 |
+| `YOUTUBE_API_KEY` | YouTube views per video (engagement), emails in descriptions | Google Cloud Console → YouTube Data API v3 |
 
 With no keys, it still uses MusicBrainz, artist websites, link pages, the bookmarklet and pasted bios.
 
-**Best value for finding artists your size:** Spotify (genre discovery plus follower counts) and Last.fm "similar to". For "similar to", seed it with an artist you've worked with or one at your level, which tends to surface peers.
+**Most important for engagement matching:** the Meta keys (Instagram engagement) and a YouTube key. The bookmarklet covers TikTok. For discovery, use Spotify by genre and Last.fm "similar to". For "similar to", seed it with an artist you've worked with or one at your level, which tends to surface peers.
 
-## How "around my level" works
+## How "around my level" works (engagement)
 
-For each platform where both you and the artist have a number, the tool divides theirs by yours. It then averages those ratios across platforms (a geometric mean). For example, if they have 2× your Instagram followers and 1× your Spotify followers, the result is about 1.4×. By default, 0.25× to 4× counts as "your level"; you can change the range in Settings. Artists with no comparable numbers show as `?`. The default Leads view includes them, so add a handle and re-check, or capture them, to get their size.
+Level is based on how many people actually engage with a typical post, not on followers. An account with 200K followers whose posts get 300 likes is at the same level as one with 5K followers getting 300 likes.
 
-When "Only artists around my level" is on, discovery first gets a cheap size number (Spotify or Last.fm) and skips far-off artists before spending a full email lookup on them. Skipped artists are still saved, so they're never checked twice. They appear under the "Bigger" and "Smaller" filters.
+| Platform | Engagement measured | Where it comes from |
+|---|---|---|
+| Instagram | Median likes + comments per post, over the last 12 posts | Official API (Meta keys), or typed in by hand |
+| TikTok | Median views per video, recent videos with pinned ones skipped | Capture bookmarklet on their profile, or typed in by hand |
+| YouTube | Median views per video, over the last 10 uploads | YouTube API key |
+
+Medians keep one viral post from skewing the number. Each platform is compared only with the same platform: their Instagram against your Instagram, their TikTok views against your TikTok views. The ratios are then averaged (a geometric mean). By default, 0.25× to 4× your engagement counts as "your level"; you can change the range in Settings.
+
+**Setting your own level:**
+
+- **Instagram:** Settings → "Fill in my engagement automatically" with your handle (needs Meta keys).
+- **YouTube:** paste your channel link there (needs a YouTube key).
+- **TikTok:** open your own profile, click **Capture artist**, then **This is me**.
+- **Anything else:** type the numbers in.
+
+Followers, Spotify and Last.fm numbers are still shown as context. The Leads list also shows the Instagram engagement rate (engagement ÷ followers). A rate under 1% is flagged, because it often means bought followers.
+
+Engagement is only known after an artist is looked up. So with "Only artists around my level" on, discovery looks each artist up and then keeps or skips them. Skipped artists are saved, so they're never checked twice, and they appear under the "Bigger" and "Smaller" filters. Artists whose engagement couldn't be measured are kept and shown as `?`. To capture their TikTok or enter numbers by hand, use the bookmarklet or the artist page. Spotify lists popular artists first, so the optional "skip artists with more than N Spotify followers" field saves time on superstars.
 
 ## Command line
 

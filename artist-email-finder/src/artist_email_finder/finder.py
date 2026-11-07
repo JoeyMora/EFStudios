@@ -123,6 +123,11 @@ class Finder:
         # 3. Websites and link-in-bio pages (also reveals social handles).
         crawl_new()
 
+        def keep_ig(info: dict) -> None:
+            for key in ("instagram_followers", "instagram_engagement"):
+                if info.get(key) is not None:
+                    result.metrics[key] = info[key]
+
         # 4. Instagram and TikTok.
         ig = next((h for h in map(instagram_handle, links) if h), "")
         tt = next((h for h in map(tiktok_handle, links) if h), "")
@@ -132,8 +137,7 @@ class Finder:
             ig_findings, info = self.instagram.find(ig)
             findings.extend(ig_findings)
             if info:
-                if info.get("instagram_followers") is not None:
-                    result.metrics["instagram_followers"] = info["instagram_followers"]
+                keep_ig(info)
                 if info.get("website"):
                     add_links([info["website"]])
                     crawl_new()  # their bio link: usually a Linktree with the email
@@ -162,8 +166,7 @@ class Finder:
         if self.instagram and ig and ig != ig_tried:
             ig_findings, info = self.instagram.find(ig)
             findings.extend(ig_findings)
-            if info.get("instagram_followers") is not None:
-                result.metrics["instagram_followers"] = info["instagram_followers"]
+            keep_ig(info)
             if info.get("website"):
                 add_links([info["website"]])
                 crawl_new()
@@ -183,8 +186,10 @@ class Finder:
                 result.pages_checked.append(info["url"])
                 if info.get("subscribers") is not None:
                     result.metrics["youtube_subscribers"] = info["subscribers"]
+                if info.get("views") is not None:
+                    result.metrics["youtube_views"] = info["views"]
 
-        # 6. Audience size, for level matching.
+        # 6. Audience size (context only; level uses engagement).
         if self.spotify and "spotify_followers" not in result.metrics:
             sp = self.spotify.lookup(artist.name)
             if sp:

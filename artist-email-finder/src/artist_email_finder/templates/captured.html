@@ -11,8 +11,15 @@
     <div class="notice">No email in the bio. You can paste one in by hand on the artist page.</div>
   {% endif %}
   {% for k, v in metrics.items() %}<p>{{ METRICS[k] }}: <b>{{ v|compact }}</b></p>{% endfor %}
-  <p><span class="badge lvl-{{ lead.level_bucket }}">{{ lead.level_ratio|ratio }} your size</span></p>
+  <p><span class="badge lvl-{{ lead.level_bucket }}">{{ lead.level_ratio|ratio }} your engagement</span></p>
   <p><a class="btn primary" href="{{ url_for('lead', lead_id=lead.id) }}">Open artist</a>
      <a class="btn" href="javascript:window.close()">Close tab</a></p>
+  {% if metrics.keys()|select('in', ENGAGEMENT)|list %}
+  <form method="post" action="{{ url_for('capture_me') }}">
+    <input type="hidden" name="lead_id" value="{{ lead.id }}">
+    <p class="small muted">Captured your own profile? Use it as your level instead of saving it as a lead.</p>
+    <button>This is me: use as my level</button>
+  </form>
+  {% endif %}
 </div>
 {% endblock %}
