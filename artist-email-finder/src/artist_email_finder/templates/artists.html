@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Artists{% endblock %}
+{% block content %}
+{% macro filter_link(label, key, value, extra="") %}
+  {% set on = (f[key] == value) %}
+  <a class="chip {{ 'on' if on }}" href="{{ url_for('leads', **dict(args, **{key: ('' if on and value else value)})) }}">{{ extra }}{{ label }}</a>
+{% endmacro %}
+<div class="page-head">
+  <div>
+    <h1>Artists</h1>
+    <p>{{ counts.all }} artists · {{ counts.get('level_match', 0) }} at your level · {{ counts.with_email }} with an email</p>
+  </div>
+  <span class="spacer"></span>
+  <form method="get" class="row" style="gap:8px">
+    {% for k, v in args.items() if k != 'q' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <input type="search" name="q" value="{{ f.q }}" placeholder="Search names, genres, emails…" style="width:260px;border-radius:999px">
+  </form>
+  <a class="btn ghost sm" href="{{ export_url }}">Export CSV</a>
+</div>
+
+<div class="chips scroll" style="margin-bottom:10px">
+  {{ filter_link('All', 'status', 'active') }}
+  {% for s in ['new', 'shortlist', 'contacted', 'replied', 'not_a_fit'] %}{{ filter_link(STATUS_LABELS[s] ~ ' · ' ~ counts.get(s, 0), 'status', s) }}{% endfor %}
+</div>
+<div class="chips scroll" style="margin-bottom:22px">
+  {{ filter_link('Your level', 'level', 'match') }}
+  {{ filter_link('Bigger', 'level', 'bigger') }}
+  {{ filter_link('Smaller', 'level', 'smaller') }}
+  {{ filter_link('Has email', 'has_email', 'yes') }}
+  {{ filter_link('★ Starred', 'starred', '1') }}
+  <span style="width:1px;background:var(--line);margin:0 4px"></span>
+  {% for g, n in genres %}{{ filter_link(g, 'genre', g) }}{% endfor %}
+  <span class="spacer"></span>
+  <form method="get">
+    {% for k, v in args.items() if k != 'sort' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <select name="sort" onchange="this.form.submit()" aria-label="Sort" style="border-radius:999px;padding:6px 12px">
+      {% for v, label in [('level', 'Closest to my level'), ('email', 'Best email'), ('newest', 'Newest'), ('updated', 'Recently updated'), ('biggest', 'Most engagement'), ('smallest', 'Least engagement'), ('name', 'A–Z')] %}
+      <option value="{{ v }}" {% if f.sort == v %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </form>
+</div>
+
+{% if leads %}
+<div class="tiles">
+  {% for l in leads %}{{ ui.tile(l) }}{% endfor %}
+</div>
+{% if more %}<div style="text-align:center;margin-top:24px"><a class="btn" href="{{ url_for('leads', page=page + 1, **args) }}">Show more</a></div>{% endif %}
+{% else %}
+<div class="empty"><div class="big">🎤</div>
+  {% if counts.all %}No artists match these filters.{% else %}No artists yet. Head to <a href="{{ url_for('discover_page') }}">Discover</a> and describe who you're looking for.{% endif %}</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>document.body.dataset.refreshOnClose = '1';</script>{% endblock %}

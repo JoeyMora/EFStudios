@@ -7,22 +7,23 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import re
 from urllib.parse import quote, urlencode, urlparse
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
 
+from .ai import SearchPlan, ai_available, plan_search
 from .config import Settings
 from .counts import followers_in, parse_count
 from .extract import context_for, emails_from_text
 from .jobs import JobRunner
-import math
-
 from .level import (AUDIENCE, ENGAGEMENT, METRICS, PLATFORMS, describe, engagement_rate,
                     platform_ratios, typical)
 from .models import Artist, ArtistResult, EmailResult, Finding
 from .net import HttpClient
 from .scoring import rank
+from .smart import COUNTRY_NAMES
 from .sources.instagram import InstagramGraph, instagram_handle, tiktok_handle
 from .sources.youtube import YouTube
 from .store import STATUS_LABELS, STATUSES, Store
@@ -187,6 +188,8 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
                                  ENGAGEMENT=ENGAGEMENT, AUDIENCE=AUDIENCE)
     app.jinja_env.filters["eng_rate"] = engagement_rate
     app.jinja_env.filters["meterpos"] = meter_pos
+    app.jinja_env.filters["hue"] = lambda name: (sum(ord(c) * (i + 7) for i, c in enumerate(name or "")) * 37) % 360
+    app.jinja_env.filters["country_name"] = lambda code: COUNTRY_NAMES.get(code, code)
 
     @app.context_processor
     def level_context():
@@ -201,46 +204,120 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
         if "status" not in request.args:
             f["status"] = "active"
         if "level" not in request.args:
-            f["level"] = "match+unknown" if store.my_metrics() else ""
+            f["level"] = ""
         f["sort"] = f["sort"] or ("level" if store.my_metrics() else "newest")
         return f
 
-    # -- leads ------------------------------------------------------------------
+    def mailto_for(row: dict, email: str) -> str:
+        s = store.settings()
+        return "mailto:{}?{}".format(email, urlencode(
+            {"subject": fill(s["email_subject"], row), "body": fill(s["email_body"], row)},
+            quote_via=quote))
+
+    @app.context_processor
+    def shell_context():
+        return {"ai_on": ai_available(), "pick_count": len(store.picks(99))}
+
+    # -- discover (prompt search) -------------------------------------------------
     @app.get("/")
+    def home():
+        return redirect(url_for("discover_page"))
+
+    @app.get("/discover")
+    def discover_page():
+        search_id = request.args.get("s", type=int)
+        search = store.search(search_id) if search_id else None
+        results = store.search_results(search_id) if search else []
+        plan = SearchPlan.from_dict(search["plan"]) if search else None
+        return render_template("discover.html", search=search, plan=plan, results=results,
+                               recent=store.searches(8), status=settings.status(), s=settings,
+                               has_level=bool(store.my_metrics()))
+
+    @app.post("/search")
+    def run_search():
+        prompt = (request.form.get("prompt") or "").strip()
+        if not prompt:
+            return redirect(url_for("discover_page"))
+        plan = plan_search(prompt)
+        search_id = store.create_search(prompt, plan.to_dict())
+        job_id = runner.submit("search", {"search_id": search_id, "prompt": prompt})
+        store.set_search_job(search_id, job_id)
+        return redirect(url_for("discover_page", s=search_id))
+
+    @app.get("/api/search/<int:search_id>")
+    def api_search(search_id: int):
+        search = store.search(search_id)
+        if not search:
+            abort(404)
+        job = search["job"] or {}
+        html = render_template("_tiles.html", leads=store.search_results(search_id), show_reason=True)
+        return jsonify(status=job.get("status", "done"), message=job.get("message", ""),
+                       progress=job.get("progress", 0), total=job.get("total", 0),
+                       count=search["n"], html=html)
+
+    # -- for you ------------------------------------------------------------------
+    def recommend_running() -> bool:
+        return any(j["kind"] == "recommend" and j["status"] in ("queued", "running") for j in store.jobs(10))
+
+    @app.get("/for-you")
+    def for_you():
+        picks = store.picks(30)
+        liked, _ = store.taste()
+        if len(picks) < 3 and liked and not recommend_running() and request.args.get("auto", "1") == "1":
+            runner.submit("recommend", {"limit": 12})
+        return render_template("foryou.html", picks=picks, liked=liked, running=recommend_running())
+
+    @app.post("/picks/refresh")
+    def refresh_picks():
+        if not recommend_running():
+            runner.submit("recommend", {"limit": int(request.form.get("limit") or 12)})
+        return redirect(url_for("for_you", auto=0))
+
+    @app.post("/api/pick/<int:lead_id>")
+    def api_pick(lead_id: int):
+        """Swipe actions: save (shortlist + star) or pass (not a fit)."""
+        action = (request.get_json(force=True) or {}).get("action")
+        if action == "save":
+            store.update_lead(lead_id, status="shortlist", starred=1)
+        elif action == "pass":
+            store.update_lead(lead_id, status="not_a_fit")
+        else:
+            abort(400)
+        return jsonify(ok=True, remaining=len(store.picks(99)))
+
+    # -- artists library ------------------------------------------------------------
+    @app.get("/artists")
     def leads():
         f = current_filters()
+        per_page = 60
         page = max(1, request.args.get("page", 1, type=int))
-        per_page = 100
-        view = request.args.get("view", "cards")
-        if view not in ("cards", "board", "list"):
-            view = "cards"
-        query = {**f, "starred": f["starred"] == "1"}
-        if view == "board":  # every status gets a column
-            query["status"] = ""
-            per_page = 1000
-        rows, total = store.leads(**query, limit=per_page, offset=(page - 1) * per_page)
-        # The map shows every lead that matches the other filters, at any level.
-        everything, _ = store.leads(**{**query, "level": ""}, limit=3000)
+        rows, total = store.leads(**{**f, "starred": f["starred"] == "1"}, limit=per_page * page)
+        args = {k: v for k, v in f.items() if v}
+        return render_template("artists.html", leads=rows, total=total, f=f, page=page,
+                               more=total > per_page * page, args=args, counts=store.counts(),
+                               genres=store.genre_counts(10), has_level=bool(store.my_metrics()),
+                               export_url=url_for("export") + "?" + urlencode(args))
+
+    @app.get("/pipeline")
+    def pipeline():
+        rows, _ = store.leads(status="", limit=2000, sort="updated")
         points = [{"id": r["id"], "name": r["name"], "r": r["level_ratio"],
                    "score": r["best_score"], "email": r["best_email"],
                    "conf": r["best_confidence"], "status": STATUS_LABELS[r["status"]],
                    "img": r["image_url"], "bucket": r["level_bucket"]}
-                  for r in everything if r["level_ratio"] is not None]
-        unknown = sum(1 for r in everything if r["level_ratio"] is None)
-        args = {k: v for k, v in f.items() if v}
-        return render_template("leads.html", leads=rows, total=total, f=f, page=page,
-                               pages=max(1, -(-total // per_page)), counts=store.counts(),
-                               has_level=bool(store.my_metrics()), args=args, view=view,
-                               points=points, unknown=unknown,
-                               export_url=url_for("export") + "?" + urlencode(args))
+                  for r in rows if r["level_ratio"] is not None and r["status"] != "not_a_fit"]
+        unknown = sum(1 for r in rows if r["level_ratio"] is None)
+        return render_template("pipeline.html", leads=rows, points=points, unknown=unknown,
+                               counts=store.counts(), has_level=bool(store.my_metrics()))
 
     @app.get("/export.csv")
     def export():
         f = current_filters()
         rows, _ = store.leads(**{**f, "starred": f["starred"] == "1"}, limit=100_000)
         buf = io.StringIO()
-        cols = ["name", "best_email", "best_confidence", "status", "level", "instagram",
-                "tiktok", "website", "spotify_url", *METRICS, "genres", "location", "notes"]
+        cols = ["name", "best_email", "best_confidence", "status", "level", "genres", "tags",
+                "gender", "artist_type", "country", "location", "instagram", "tiktok", "website",
+                "spotify_url", *METRICS, "notes"]
         w = csv.DictWriter(buf, fieldnames=cols)
         w.writeheader()
         for r in rows:
@@ -265,25 +342,29 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
                     store.delete_lead(i)
         return redirect(request.form.get("next") or url_for("leads"))
 
-    @app.get("/lead/<int:lead_id>")
-    def lead(lead_id: int):
+    # -- one artist -----------------------------------------------------------------
+    def lead_context(lead_id: int) -> dict:
         row = store.lead(lead_id)
         if not row:
             abort(404)
-        s = store.settings()
-        mailto = {}
-        for e in row["emails"]:
-            mailto[e["id"]] = "mailto:{}?{}".format(e["email"], urlencode(
-                {"subject": fill(s["email_subject"], row), "body": fill(s["email_body"], row)},
-                quote_via=quote))
-        return render_template("lead.html", lead=row, mailto=mailto,
-                               my=store.my_metrics(), back=request.args.get("back", ""))
+        return {"lead": row, "mailto": {e["id"]: mailto_for(row, e["email"]) for e in row["emails"]},
+                "best_mailto": mailto_for(row, row["best_email"]) if row["best_email"] else ""}
+
+    @app.get("/lead/<int:lead_id>")
+    def lead(lead_id: int):
+        return render_template("lead.html", **lead_context(lead_id), back=request.args.get("back", ""))
+
+    @app.get("/lead/<int:lead_id>/drawer")
+    def lead_drawer(lead_id: int):
+        return render_template("_drawer.html", **lead_context(lead_id), in_drawer=True)
 
     @app.post("/api/lead/<int:lead_id>")
     def api_update_lead(lead_id: int):
         data = request.get_json(force=True)
         if "starred" in data:
             data["starred"] = 1 if data["starred"] else 0
+        if "genres" in data:
+            data["genres"] = "; ".join(g.strip().lower() for g in re.split(r"[,;]", data["genres"]) if g.strip())
         store.update_lead(lead_id, **data)
         return jsonify(ok=True)
 
@@ -291,6 +372,8 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
     def update_lead(lead_id: int):
         form = request.form
         fields = {k: form[k].strip() for k in ("status", "notes", "name", "website") if k in form}
+        if "genres" in form:
+            fields["genres"] = "; ".join(g.strip().lower() for g in re.split(r"[,;]", form["genres"]) if g.strip())
         for key, parse in (("instagram", instagram_handle), ("tiktok", tiktok_handle)):
             if key in form:
                 value = form[key].strip()
@@ -337,6 +420,8 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
     @app.post("/lead/<int:lead_id>/recheck")
     def recheck(lead_id: int):
         runner.submit("recheck", {"lead_ids": [lead_id]})
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify(ok=True)
         return redirect(url_for("lead", lead_id=lead_id, checking=1))
 
     @app.post("/lead/<int:lead_id>/delete")
@@ -344,12 +429,10 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
         store.delete_lead(lead_id)
         return redirect(request.form.get("back") or url_for("leads"))
 
-    # -- finding artists --------------------------------------------------------
+    # -- other ways to add artists ------------------------------------------------------
     @app.get("/find")
     def find():
-        return render_template("find.html", status=settings.status(), s=settings,
-                               has_level=bool(store.my_metrics()), my=store.my_metrics(),
-                               jobs=store.jobs())
+        return redirect(url_for("discover_page") + "#more")
 
     @app.post("/find/discover")
     def discover():
@@ -363,14 +446,14 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
             "max_spotify_followers": form.get("max_spotify_followers", type=int),
         }
         runner.submit("discover", params)
-        return redirect(url_for("find"))
+        return redirect(url_for("leads", sort="newest"))
 
     @app.post("/find/lookup")
     def lookup():
         lines = [l.strip() for l in request.form.get("lines", "").splitlines() if l.strip()]
         if lines:
             runner.submit("lookup", {"lines": lines})
-        return redirect(url_for("find"))
+        return redirect(url_for("leads", sort="newest"))
 
     @app.get("/api/jobs")
     def api_jobs():

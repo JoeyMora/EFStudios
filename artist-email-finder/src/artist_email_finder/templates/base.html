@@ -2,12 +2,22 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b10">
 <title>{% block title %}Artist Finder{% endblock %} · EF Studios</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-discover" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/><path d="M8.5 11h5M11 8.5v5"/></symbol>
+  <symbol id="i-foryou" viewBox="0 0 24 24"><path d="M12 3l2.2 5.3L20 9l-4.4 3.8L17 18.5 12 15.6 7 18.5l1.4-5.7L4 9l5.8-.7z"/></symbol>
+  <symbol id="i-artists" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></symbol>
+  <symbol id="i-pipeline" viewBox="0 0 24 24"><rect x="3.5" y="4" width="4.5" height="16" rx="1.5"/><rect x="9.75" y="4" width="4.5" height="11" rx="1.5"/><rect x="16" y="4" width="4.5" height="7" rx="1.5"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
   <symbol id="i-instagram" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.3" cy="6.7" r=".6" fill="currentColor"/></symbol>
   <symbol id="i-tiktok" viewBox="0 0 24 24"><path d="M14 3v11.5a3.5 3.5 0 1 1-3.5-3.5"/><path d="M14 3c.4 2.6 2.3 4.5 5 4.8"/></symbol>
   <symbol id="i-youtube" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="19" height="13" rx="4"/><path d="M10.5 9.5v5l4-2.5z" fill="currentColor"/></symbol>
@@ -15,52 +25,39 @@
   <symbol id="i-web" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></symbol>
   <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M4 7l8 6 8-6"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
-  <symbol id="i-cards" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></symbol>
-  <symbol id="i-board" viewBox="0 0 24 24"><rect x="3.5" y="4" width="4.5" height="16" rx="1.5"/><rect x="9.75" y="4" width="4.5" height="11" rx="1.5"/><rect x="16" y="4" width="4.5" height="7" rx="1.5"/></symbol>
-  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/></symbol>
 </svg>
-<nav class="top">
-  <a class="brand" href="{{ url_for('leads') }}">EF Studios · Artist Finder</a>
-  <a class="tab {% if request.endpoint in ('leads', 'lead') %}on{% endif %}" href="{{ url_for('leads') }}">Leads</a>
-  <a class="tab {% if request.endpoint == 'find' %}on{% endif %}" href="{{ url_for('find') }}">Find artists</a>
-  <a class="tab {% if request.endpoint == 'settings_page' %}on{% endif %}" href="{{ url_for('settings_page') }}">My level &amp; settings</a>
-  <span id="jobs-indicator"></span>
+
+{% set nav = [('discover_page', 'discover', 'Discover'), ('for_you', 'foryou', 'For you'), ('leads', 'artists', 'Artists'), ('pipeline', 'pipeline', 'Pipeline'), ('settings_page', 'settings', 'Settings')] %}
+<div class="shell">
+  <aside class="side">
+    <a class="logo" href="{{ url_for('discover_page') }}"><span class="mark">EF</span><span>Artist Finder<small>EF Studios</small></span></a>
+    {% for ep, ic, label in nav %}
+    <a class="nav {{ 'on' if request.endpoint == ep or (ep == 'leads' and request.endpoint == 'lead') }}" href="{{ url_for(ep) }}">
+      <svg class="icon lg" aria-hidden="true"><use href="#i-{{ ic }}"/></svg>{{ label }}
+      {% if ep == 'for_you' and pick_count %}<span class="badge brand">{{ pick_count }}</span>{% endif %}
+    </a>
+    {% endfor %}
+    <div class="grow"></div>
+    <div class="jobbox" id="jobbox"><span id="jobtext">Working…</span><div class="bar"><div></div></div></div>
+  </aside>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<nav class="mobile-nav">
+  {% for ep, ic, label in nav %}
+  <a class="{{ 'on' if request.endpoint == ep }}" href="{{ url_for(ep) }}"><svg class="icon lg" aria-hidden="true"><use href="#i-{{ ic }}"/></svg>{{ label }}</a>
+  {% endfor %}
 </nav>
-<main>
-{% block content %}{% endblock %}
-</main>
-<script>
-async function copyText(btn, text) {
-  try { await navigator.clipboard.writeText(text); } catch (e) {
-    const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t);
-    t.select(); document.execCommand('copy'); t.remove();
-  }
-  const old = btn.innerHTML; btn.textContent = 'Copied'; setTimeout(() => btn.innerHTML = old, 1200);
-}
-async function updateLead(id, data) {
-  await fetch('/api/lead/' + id, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
-}
-let jobsWereRunning = false;
-async function pollJobs() {
-  try {
-    const jobs = await (await fetch('/api/jobs')).json();
-    const running = jobs.filter(j => j.status === 'running' || j.status === 'queued');
-    const el = document.getElementById('jobs-indicator');
-    if (running.length) {
-      const j = running.find(j => j.status === 'running') || running[0];
-      el.innerHTML = '<span class="spin"></span>' + (j.message || j.kind).replace(/</g, '&lt;') +
-        (running.length > 1 ? ' (+' + (running.length - 1) + ' queued)' : '');
-    } else {
-      el.textContent = '';
-    }
-    if (window.onJobs) window.onJobs(jobs);
-    if (jobsWereRunning && !running.length && window.reloadWhenJobsFinish) location.reload();
-    jobsWereRunning = running.length > 0;
-  } catch (e) {}
-}
-pollJobs(); setInterval(pollJobs, 2500);
-</script>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Artist details" aria-hidden="true"></aside>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="tip" id="tip"></div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

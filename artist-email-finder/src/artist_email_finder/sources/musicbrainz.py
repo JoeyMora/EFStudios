@@ -1,4 +1,5 @@
-"""MusicBrainz (free, no key): artist links, and discovery by genre tag + area.
+"""MusicBrainz (free, no key): artist profiles (links, genres, gender, solo/group,
+country), and filtered search by genre/tag, gender, type, country and area.
 
 API terms ask for at most 1 request per second and a descriptive User-Agent.
 """
@@ -8,8 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Iterator
 
-from ..net import HttpClient
 from ..models import Artist
+from ..net import HttpClient
 from ..scoring import name_similarity
 
 log = logging.getLogger(__name__)
@@ -18,8 +19,18 @@ API = "https://musicbrainz.org/ws/2"
 DELAY = 1.1
 
 
-def _lucene_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+def _q(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _type(t: str | None) -> str:
+    t = (t or "").lower()
+    return "group" if t in {"group", "orchestra", "choir"} else "solo" if t == "person" else ""
+
+
+def _gender(g: str | None) -> str:
+    g = (g or "").lower()
+    return {"female": "female", "male": "male", "non-binary": "nonbinary"}.get(g, "")
 
 
 class MusicBrainz:
@@ -27,51 +38,89 @@ class MusicBrainz:
         self.http = http
 
     def _get(self, path: str, params: dict) -> dict | None:
-        params = {**params, "fmt": "json"}
-        return self.http.get_json(f"{API}/{path}", params=params, delay=DELAY)
+        return self.http.get_json(f"{API}/{path}", params={**params, "fmt": "json"}, delay=DELAY)
 
-    def urls_for(self, mbid: str) -> list[str]:
-        data = self._get(f"artist/{mbid}", {"inc": "url-rels"})
+    def profile_by_id(self, mbid: str) -> dict:
+        data = self._get(f"artist/{mbid}", {"inc": "url-rels+genres+tags"})
         if not data:
-            return []
+            return {}
         urls = []
         for rel in data.get("relations", []):
             resource = (rel.get("url") or {}).get("resource")
             if resource and not rel.get("ended") and resource not in urls:
                 urls.append(resource)
-        return urls
+        by_count = lambda xs: [x["name"].lower() for x in sorted(xs or [], key=lambda x: -x.get("count", 0))]
+        genres = by_count(data.get("genres"))
+        return {
+            "id": mbid,
+            "name": data.get("name", ""),
+            "gender": _gender(data.get("gender")),
+            "artist_type": _type(data.get("type")),
+            "country": data.get("country") or "",
+            "location": ((data.get("begin-area") or data.get("area") or {}).get("name", "")),
+            "genres": genres[:5],
+            "tags": [t for t in by_count(data.get("tags")) if t not in genres][:10],
+            "urls": urls,
+            "disambiguation": data.get("disambiguation", ""),
+        }
+
+    def profile(self, name: str) -> dict:
+        """Profile of the best exact-name match, or {}."""
+        data = self._get("artist", {"query": f"artist:{_q(name)}", "limit": 5})
+        for cand in (data or {}).get("artists", []):
+            if int(cand.get("score", 0)) >= 90 and name_similarity(name, cand.get("name", "")) >= 0.9:
+                return self.profile_by_id(cand["id"])
+        return {}
 
     def find_links(self, name: str) -> list[str]:
-        """Links (website, socials, YouTube...) for the best-matching artist name."""
-        data = self._get("artist", {"query": f'artist:"{_lucene_escape(name)}"', "limit": 5})
-        if not data:
-            return []
-        for cand in data.get("artists", []):
-            if int(cand.get("score", 0)) >= 90 and name_similarity(name, cand.get("name", "")) >= 0.9:
-                return self.urls_for(cand["id"])
-        return []
+        return self.profile(name).get("urls", [])
 
-    def discover(self, genre: str = "", area: str = "") -> Iterator[Artist]:
+    @staticmethod
+    def build_query(genres=(), tags=(), gender="any", artist_type="any", countries=(),
+                    identity_tags=(), areas=()) -> str:
         clauses = []
-        if genre:
-            clauses.append(f'tag:"{_lucene_escape(genre)}"')
-        if area:
-            clauses.append(f'(area:"{_lucene_escape(area)}" OR beginarea:"{_lucene_escape(area)}")')
-        if not clauses:
-            raise ValueError("MusicBrainz discovery needs a genre and/or an area")
-        query = " AND ".join(clauses)
+        style = [*genres, *tags]
+        if style:
+            clauses.append("(" + " OR ".join(f"tag:{_q(t)}" for t in style) + ")")
+        if gender in ("female", "male"):
+            clauses.append(f"gender:{gender}")
+        elif gender == "nonbinary":
+            clauses.append('gender:"non-binary"')
+        if artist_type == "group":
+            clauses.append("type:group")
+        elif artist_type == "solo":
+            clauses.append("type:person")
+        origin = [f"country:{c}" for c in countries] + [f"tag:{_q(t)}" for t in identity_tags]
+        if origin:
+            clauses.append("(" + " OR ".join(origin) + ")")
+        if areas:
+            clauses.append("(" + " OR ".join(f"area:{_q(a)} OR beginarea:{_q(a)}" for a in areas) + ")")
+        return " AND ".join(clauses)
+
+    def search(self, query: str, max_results: int = 1000) -> Iterator[Artist]:
+        """Artists matching an advanced query, each with its full profile."""
+        if not query:
+            return
         offset = 0
-        while offset < 2000:
+        while offset < max_results:
             data = self._get("artist", {"query": query, "limit": 100, "offset": offset})
             batch = (data or {}).get("artists", [])
             if not batch:
                 return
             for a in batch:
-                tags = [t["name"] for t in sorted(a.get("tags", []),
-                                                  key=lambda t: -t.get("count", 0))][:5]
-                location = (a.get("begin-area") or a.get("area") or {}).get("name", "")
-                artist = Artist(name=a["name"], genres=tags, location=location,
-                                discovered_via="musicbrainz")
-                artist.links = self.urls_for(a["id"])
-                yield artist
+                prof = self.profile_by_id(a["id"])
+                if prof:
+                    yield artist_from_profile(prof, discovered_via="musicbrainz")
             offset += len(batch)
+
+    def discover(self, genre: str = "", area: str = "") -> Iterator[Artist]:
+        if not genre and not area:
+            raise ValueError("MusicBrainz discovery needs a genre and/or an area")
+        return self.search(self.build_query(genres=[genre] if genre else [], areas=[area] if area else []))
+
+
+def artist_from_profile(prof: dict, discovered_via: str = "") -> Artist:
+    return Artist(name=prof["name"], links=list(prof.get("urls", [])), genres=list(prof.get("genres", [])),
+                  location=prof.get("location", ""), gender=prof.get("gender", ""),
+                  artist_type=prof.get("artist_type", ""), country=prof.get("country", ""),
+                  tags=list(prof.get("tags", [])), discovered_via=discovered_via, profiled=True)

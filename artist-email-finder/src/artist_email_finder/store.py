@@ -78,8 +78,35 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at REAL,
     finished_at REAL
 );
+CREATE TABLE IF NOT EXISTS searches (
+    id INTEGER PRIMARY KEY,
+    prompt TEXT,
+    plan TEXT,
+    job_id INTEGER,
+    created_at REAL
+);
+CREATE TABLE IF NOT EXISTS search_results (
+    search_id INTEGER REFERENCES searches(id) ON DELETE CASCADE,
+    lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+    score REAL DEFAULT 0,
+    reason TEXT DEFAULT '',
+    created_at REAL,
+    PRIMARY KEY (search_id, lead_id)
+);
 CREATE INDEX IF NOT EXISTS leads_status ON leads(status);
 """
+
+# Columns added after the first release: (name, SQL type and default).
+NEW_COLUMNS = [
+    ("image_url", "TEXT DEFAULT ''"),
+    ("gender", "TEXT DEFAULT ''"),
+    ("artist_type", "TEXT DEFAULT ''"),
+    ("country", "TEXT DEFAULT ''"),
+    ("tags", "TEXT DEFAULT ''"),
+    ("pick_reason", "TEXT DEFAULT ''"),
+    ("pick_score", "REAL DEFAULT 0"),
+    ("picked_at", "REAL"),
+]
 
 
 def _absln(x):
@@ -98,8 +125,9 @@ class Store:
             c.executescript(SCHEMA)
             # Columns added after the first release.
             cols = {r["name"] for r in c.execute("PRAGMA table_info(leads)")}
-            if "image_url" not in cols:
-                c.execute("ALTER TABLE leads ADD COLUMN image_url TEXT DEFAULT ''")
+            for name, decl in NEW_COLUMNS:
+                if name not in cols:
+                    c.execute(f"ALTER TABLE leads ADD COLUMN {name} {decl}")
 
     @contextmanager
     def conn(self):
@@ -185,6 +213,8 @@ class Store:
             "genres": "; ".join(artist.genres), "location": artist.location,
             "spotify_url": artist.spotify_url, "discovered_via": artist.discovered_via,
             "image_url": artist.image_url,
+            "gender": artist.gender, "artist_type": artist.artist_type,
+            "country": artist.country, "tags": "; ".join(artist.tags),
         }
         if result:
             metrics.update({k: v for k, v in result.metrics.items() if v is not None})
@@ -214,12 +244,14 @@ class Store:
                 cur = c.execute(
                     "INSERT INTO leads(name, name_key, genres, location, spotify_url, instagram, "
                     "tiktok, website, links, metrics, discovered_via, last_checked, created_at, "
-                    "updated_at, image_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "updated_at, image_url, gender, artist_type, country, tags) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (artist.name, name_key(artist.name), fields["genres"], fields["location"],
                      fields["spotify_url"], fields.get("instagram", ""), fields.get("tiktok", ""),
                      fields.get("website", ""), json.dumps(links), json.dumps(metrics),
                      fields["discovered_via"], now if result else None, now, now,
-                     fields.get("image_url", "")))
+                     fields.get("image_url", ""), fields["gender"], fields["artist_type"],
+                     fields["country"], fields["tags"]))
                 lead_id = cur.lastrowid
         if result:
             self.add_emails(lead_id, result.emails)
@@ -270,7 +302,8 @@ class Store:
                        best["score"] if best else 0, r, b, lead_id))
 
     def update_lead(self, lead_id: int, **fields) -> None:
-        allowed = {"status", "notes", "starred", "name", "instagram", "tiktok", "website"}
+        allowed = {"status", "notes", "starred", "name", "instagram", "tiktok", "website", "genres",
+                   "pick_reason", "pick_score", "picked_at"}
         fields = {k: v for k, v in fields.items() if k in allowed}
         if "status" in fields and fields["status"] not in STATUSES:
             raise ValueError("bad status")
@@ -305,8 +338,8 @@ class Store:
         where, args = [], []
         if q:
             where.append("(name LIKE ? OR best_email LIKE ? OR instagram LIKE ? OR tiktok LIKE ? "
-                         "OR notes LIKE ?)")
-            args += [f"%{q}%"] * 5
+                         "OR notes LIKE ? OR genres LIKE ? OR tags LIKE ?)")
+            args += [f"%{q}%"] * 7
         if status == "active":
             where.append("status != 'not_a_fit'")
         elif status:
@@ -358,6 +391,86 @@ class Store:
                 out[f"level_{r['level_bucket']}"] = r["n"]
         return out
 
+    def genre_counts(self, limit: int = 12) -> list[tuple[str, int]]:
+        """Most common genres across leads (for filter chips)."""
+        counts: dict[str, int] = {}
+        with self.conn() as c:
+            for r in c.execute("SELECT genres FROM leads WHERE genres != ''"):
+                for g in r["genres"].split("; ")[:3]:
+                    if g:
+                        counts[g] = counts.get(g, 0) + 1
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+
+    # -- searches & picks -------------------------------------------------------
+    def create_search(self, prompt: str, plan: dict) -> int:
+        with self.conn() as c:
+            return c.execute("INSERT INTO searches(prompt, plan, created_at) VALUES(?,?,?)",
+                             (prompt, json.dumps(plan), time.time())).lastrowid
+
+    def set_search_job(self, search_id: int, job_id: int) -> None:
+        with self.conn() as c:
+            c.execute("UPDATE searches SET job_id = ? WHERE id = ?", (job_id, search_id))
+
+    def search(self, search_id: int) -> dict | None:
+        with self.conn() as c:
+            row = c.execute("SELECT s.*, (SELECT COUNT(*) FROM search_results r WHERE r.search_id = s.id) n "
+                            "FROM searches s WHERE id = ?", (search_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["plan"] = json.loads(d["plan"] or "{}")
+        d["job"] = self.job(d["job_id"]) if d["job_id"] else None
+        return d
+
+    def searches(self, limit: int = 8) -> list[dict]:
+        with self.conn() as c:
+            rows = c.execute("SELECT s.*, (SELECT COUNT(*) FROM search_results r WHERE r.search_id = s.id) n "
+                             "FROM searches s ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["plan"] = json.loads(d["plan"] or "{}")
+            with self.conn() as c:
+                d["images"] = [x["image_url"] for x in c.execute(
+                    "SELECT l.image_url FROM search_results r JOIN leads l ON l.id = r.lead_id "
+                    "WHERE r.search_id = ? AND l.image_url != '' ORDER BY r.score DESC LIMIT 4", (r["id"],))]
+            out.append(d)
+        return out
+
+    def add_search_result(self, search_id: int, lead_id: int, score: float, reason: str) -> None:
+        with self.conn() as c:
+            c.execute("INSERT INTO search_results(search_id, lead_id, score, reason, created_at) "
+                      "VALUES(?,?,?,?,?) ON CONFLICT(search_id, lead_id) DO UPDATE SET "
+                      "score = excluded.score, reason = excluded.reason",
+                      (search_id, lead_id, score, reason, time.time()))
+
+    def search_results(self, search_id: int) -> list[dict]:
+        with self.conn() as c:
+            rows = c.execute("SELECT l.*, r.score AS match_score, r.reason AS match_reason "
+                             "FROM search_results r JOIN leads l ON l.id = r.lead_id "
+                             "WHERE r.search_id = ? ORDER BY r.score DESC, r.created_at",
+                             (search_id,)).fetchall()
+        return [_lead_dict(r) for r in rows]
+
+    def set_pick(self, lead_id: int, reason: str, score: float) -> None:
+        self.update_lead(lead_id, pick_reason=reason, pick_score=score, picked_at=time.time())
+
+    def picks(self, limit: int = 50) -> list[dict]:
+        """Recommended artists not reviewed yet (still 'new')."""
+        with self.conn() as c:
+            rows = c.execute("SELECT * FROM leads WHERE pick_reason != '' AND status = 'new' "
+                             "ORDER BY pick_score DESC, picked_at DESC LIMIT ?", (limit,)).fetchall()
+        return [_lead_dict(r) for r in rows]
+
+    def taste(self) -> tuple[list[dict], list[dict]]:
+        """(liked, passed) leads: liked = starred/shortlisted/contacted/replied; passed = not a fit."""
+        with self.conn() as c:
+            liked = c.execute("SELECT * FROM leads WHERE starred = 1 OR status IN "
+                              "('shortlist', 'contacted', 'replied') ORDER BY updated_at DESC LIMIT 40").fetchall()
+            passed = c.execute("SELECT * FROM leads WHERE status = 'not_a_fit' "
+                               "ORDER BY updated_at DESC LIMIT 40").fetchall()
+        return [_lead_dict(r) for r in liked], [_lead_dict(r) for r in passed]
+
     # -- jobs -----------------------------------------------------------------
     def create_job(self, kind: str, params: dict) -> int:
         with self.conn() as c:
@@ -392,6 +505,8 @@ def _lead_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["links"] = json.loads(d.get("links") or "[]")
     d["metrics"] = json.loads(d.get("metrics") or "{}")
+    d["genre_list"] = [g for g in (d.get("genres") or "").split("; ") if g]
+    d["tag_list"] = [t for t in (d.get("tags") or "").split("; ") if t]
     return d
 
 

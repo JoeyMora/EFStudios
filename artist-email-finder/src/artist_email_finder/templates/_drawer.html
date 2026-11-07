@@ -1,0 +1,132 @@
+{% import "_ui.html" as ui with context %}
+{% set rows = platform_rows(lead.metrics) %}
+<div data-lead="{{ lead.id }}">
+<div class="dhead">
+  <div class="bg" style="{% if lead.image_url %}background-image:url('{{ lead.image_url }}'){% else %}{{ ui.grad(lead.name) }}{% endif %}"></div>
+  {% if in_drawer %}<button class="iconbtn close ghost" data-close aria-label="Close">{{ ui.icon('x', 'lg') }}</button>{% endif %}
+  <div class="who">
+    {{ ui.avatar(lead, 'lg') }}
+    <div style="min-width:0">
+      <div class="row" style="gap:8px">{{ ui.star(lead, 'font-size:22px') }}<h1>{{ lead.name }}</h1></div>
+      <div class="chips" style="margin-top:8px">
+        {% for g in lead.genre_list[:4] %}<span class="chip soft tiny">{{ g }}</span>{% else %}<span class="chip tiny">genre unknown</span>{% endfor %}
+      </div>
+      <div class="small muted" style="margin-top:8px">
+        {%- set facts = [] -%}
+        {%- if lead.artist_type %}{% set _ = facts.append('Band' if lead.artist_type == 'group' else 'Solo artist') %}{% endif -%}
+        {%- if lead.gender %}{% set _ = facts.append({'female': 'Female', 'male': 'Male', 'nonbinary': 'Non-binary'}[lead.gender]) %}{% endif -%}
+        {%- if lead.location %}{% set _ = facts.append(lead.location) %}{% endif -%}
+        {%- if lead.country and lead.country|country_name not in facts %}{% set _ = facts.append(lead.country|country_name) %}{% endif -%}
+        {{ facts|join(' · ') or 'found via ' ~ (lead.discovered_via or 'input') }}
+      </div>
+    </div>
+  </div>
+  <div class="row" style="margin-top:16px">
+    {% if lead.best_email %}<a class="btn primary" href="{{ best_mailto }}">{{ ui.icon('mail') }} Email</a>
+    <button onclick="App.copy(this, '{{ lead.best_email }}')">{{ ui.icon('copy') }} Copy email</button>{% endif %}
+    <button data-recheck>{{ ui.icon('refresh') }} Re-check</button>
+    {{ ui.links(lead) }}
+  </div>
+</div>
+
+<div class="dbody">
+  <div class="seg" role="group" aria-label="Status">
+    {% for s in STATUSES %}<button type="button" data-status="{{ s }}" class="{{ 'on' if lead.status == s }}">{{ STATUS_LABELS[s] }}</button>{% endfor %}
+  </div>
+
+  {% if lead.pick_reason %}<div class="why-box">{{ ui.icon('sparkle') }} <b>Why this artist:</b> {{ lead.pick_reason }}</div>{% endif %}
+
+  <div class="panel">
+    <div class="levelline"><span>{{ ui.level_text(lead) }}</span></div>
+    {{ ui.meter(lead.level_ratio, lead.level_bucket, '', True) }}
+    {% set cmp = [] %}
+    {% for key, label in ENGAGEMENT.items() if lead.metrics.get(key) is not none and my.get(key) %}{% set _ = cmp.append((key, label)) %}{% endfor %}
+    {% if cmp %}
+    <div class="compare" style="margin-top:16px">
+      {% for key, label in cmp %}
+      {% set them, me = lead.metrics[key], my[key] %}
+      {% set top = [them, me]|max %}
+      <div class="cmp-row">
+        <div class="head"><span class="muted">{{ ui.icon(key.split('_')[0]) }}</span>{{ label }}<span class="r">{{ (them / me)|ratio }}</span></div>
+        <div class="cmp-bars" role="img" aria-label="{{ label }}: them {{ them }}, you {{ me }}">
+          <span>Them</span><div class="hbar"><div class="them" style="width:{{ (100 * them / top)|round(1) }}%"></div></div><span>{{ them|compact }}</span>
+          <span>You</span><div class="hbar"><div class="me" style="width:{{ (100 * me / top)|round(1) }}%"></div></div><span>{{ me|compact }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% elif not rows %}
+    <p class="small muted" style="margin:10px 0 0">No engagement numbers yet. Open their {% if lead.instagram %}<a href="https://www.instagram.com/{{ lead.instagram }}/reels/" target="_blank" rel="noopener">Reels tab</a>{% else %}Reels tab{% endif %} or TikTok and click <b>Capture artist</b>.</p>
+    {% endif %}
+    {% set er = lead.metrics|eng_rate %}
+    {% if er is not none %}<p class="small" style="margin:12px 0 0">Reel engagement rate <b>{{ '%.1f'|format(er) }}%</b> of {{ lead.metrics.instagram_followers|compact }} followers{% if er < 1 %} <span class="badge conf-low">low: followers may be inflated</span>{% endif %}</p>{% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Emails</h2>
+    {% for e in lead.emails %}
+    <div class="emailcard">
+      <span style="color:var(--muted);margin-top:2px">{{ ui.icon('mail') }}</span>
+      <div class="body">
+        <div class="row" style="gap:8px"><span class="email">{{ e.email }}</span><span class="badge conf-{{ e.confidence }}">{{ e.confidence }}</span></div>
+        <div class="confbar" title="confidence {{ e.score }}/100"><div class="{{ e.confidence }}" style="width:{{ e.score }}%"></div></div>
+        <div class="small muted">from {{ e.sources }}{% if e.context %}: “{{ e.context }}”{% endif %}</div>
+      </div>
+      <div class="row" style="flex-wrap:nowrap;gap:4px">
+        <button class="iconbtn ghost" title="Copy" onclick="App.copy(this, '{{ e.email }}')">{{ ui.icon('copy') }}</button>
+        <a class="btn iconbtn ghost" title="Write email" href="{{ mailto[e.id] }}">{{ ui.icon('mail') }}</a>
+      </div>
+    </div>
+    {% else %}
+    <p class="small muted" style="margin:0 0 10px">No email found yet. Capture their Instagram/TikTok bio with the bookmarklet, or add a handle below and Re-check.</p>
+    {% endfor %}
+    <form method="post" action="{{ url_for('add_email', lead_id=lead.id) }}" class="row" style="margin-top:6px">
+      <input type="text" name="email" placeholder="Add an email you found" style="flex:1">
+      <button class="sm">Add</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Notes</h2>
+    <textarea data-notes placeholder="Track, vibe, what to pitch, when you reached out…">{{ lead.notes }}</textarea>
+    <p class="small muted" style="margin:6px 0 0">Saves automatically.</p>
+  </div>
+
+  {% if rows or lead.metrics %}
+  <div class="facts">
+    {% for key, label in AUDIENCE.items() if lead.metrics.get(key) is not none %}
+    <div class="fact"><div class="v">{{ lead.metrics[key]|compact }}</div><div class="k">{{ label }}</div></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <details class="edit panel">
+    <summary>Edit details</summary>
+    <label>Genres (comma separated)</label>
+    <input type="text" data-genres value="{{ lead.genre_list|join(', ') }}" style="width:100%">
+    <form method="post" action="{{ url_for('update_lead', lead_id=lead.id) }}">
+      <label>Instagram handle</label><input type="text" name="instagram" value="{{ lead.instagram }}" style="width:100%">
+      <label>TikTok handle</label><input type="text" name="tiktok" value="{{ lead.tiktok }}" style="width:100%">
+      <label>Website / link page</label><input type="text" name="website" value="{{ lead.website }}" style="width:100%">
+      <label>Engagement (typical per reel / video)</label>
+      <div class="metric-grid">
+        {% for key, label in ENGAGEMENT.items() %}
+        <div class="metric"><div class="k">{{ label }}</div><input type="text" name="{{ key }}" placeholder="{{ lead.metrics.get(key)|compact or 'set' }}" aria-label="{{ label }}"></div>
+        {% endfor %}
+      </div>
+      <div style="margin-top:12px"><button class="sm">Save</button></div>
+    </form>
+    <form method="post" action="{{ url_for('paste_bio', lead_id=lead.id) }}" style="margin-top:16px">
+      <label>Paste a bio (emails and follower counts are picked out)</label>
+      <textarea name="text" placeholder="e.g. 12.4K followers · booking: mgmt@artist.com"></textarea>
+      <div class="row" style="margin-top:8px">
+        <select name="platform"><option value="instagram">From Instagram</option><option value="tiktok">From TikTok</option></select>
+        <button class="sm">Extract</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('delete_lead', lead_id=lead.id) }}" style="margin-top:16px" onsubmit='return confirm({{ ("Delete " ~ lead.name ~ "?")|tojson }})'>
+      <button class="sm danger">Delete this artist</button>
+    </form>
+  </details>
+</div>
+</div>

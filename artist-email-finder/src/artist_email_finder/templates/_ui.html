@@ -1,16 +1,59 @@
-{# Shared UI pieces. Import with: {% import "_ui.html" as ui %} #}
+{# Shared UI pieces. Import with: {% import "_ui.html" as ui with context %} #}
 
 {% macro icon(name, cls="") %}<svg class="icon {{ cls }}" aria-hidden="true"><use href="#i-{{ name }}"/></svg>{% endmacro %}
 
+{% macro initials(name) %}{{ (name.split()[:2]|map('first')|join)|upper }}{% endmacro %}
+{% macro grad(name) %}{% set h = name|hue %}background:linear-gradient(135deg, hsl({{ h }} 48% 36%), hsl({{ (h + 55) % 360 }} 55% 15%)){% endmacro %}
+
 {% macro avatar(lead, size="") %}
-  {%- set initials = (lead.name.split()[:2]|map('first')|join)|upper -%}
   {%- if lead.image_url -%}
   <img class="avatar {{ size }}" src="{{ lead.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer"
        onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-flex'">
-  <span class="avatar initials {{ size }}" aria-hidden="true" style="display:none">{{ initials }}</span>
+  <span class="avatar initials {{ size }}" aria-hidden="true" style="display:none;{{ grad(lead.name) }}">{{ initials(lead.name) }}</span>
   {%- else -%}
-  <span class="avatar initials {{ size }}" aria-hidden="true">{{ initials }}</span>
+  <span class="avatar initials {{ size }}" aria-hidden="true" style="{{ grad(lead.name) }}">{{ initials(lead.name) }}</span>
   {%- endif -%}
+{% endmacro %}
+
+{# Square artwork: photo, or a gradient with initials. #}
+{% macro art(lead) %}
+<div class="art" style="{{ grad(lead.name) }}">
+  {% if lead.image_url %}<img src="{{ lead.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">{% endif %}
+  {% if not lead.image_url %}<div class="ph" aria-hidden="true">{{ initials(lead.name) }}</div>{% endif %}
+  {{ caller() if caller is defined }}
+</div>
+{% endmacro %}
+
+{% macro level_pill(lead) %}
+<span class="glass lv {{ lead.level_bucket }}" title="Engagement compared with yours"><i></i>
+  {%- if lead.level_ratio is none %}Level ?{% elif lead.level_bucket == 'match' %}Your level · {{ lead.level_ratio|ratio }}{% else %}{{ lead.level_bucket|capitalize }} · {{ lead.level_ratio|ratio }}{% endif -%}
+</span>
+{% endmacro %}
+
+{% macro genres_text(lead) %}{{ (lead.genre_list[:3]|join(' · ')) or 'genre unknown' }}{% endmacro %}
+
+{# An artist tile. Clicking opens the drawer. #}
+{% macro tile(lead, why="") %}
+<div class="tile {{ 'dim' if lead.status == 'not_a_fit' }}" data-id="{{ lead.id }}" tabindex="0" role="button" aria-label="Open {{ lead.name }}">
+  {% call art(lead) %}
+    {{ level_pill(lead) }}
+    {% if lead.starred %}<span class="glass st" title="Starred">★</span>{% endif %}
+    <div class="cap"><div class="nm">{{ lead.name }}</div><div class="gn">{{ genres_text(lead) }}</div></div>
+  {% endcall %}
+  <div class="info">
+    {% if why %}<div class="why" title="{{ why }}">{{ why }}</div>{% endif %}
+    <div class="line">
+      {% if lead.best_email %}<span class="dotc {{ lead.best_confidence }}" title="{{ lead.best_confidence }} confidence"></span><span class="email">{{ lead.best_email }}</span>
+      {% else %}<span class="dotc none"></span><span>No email yet</span>{% endif %}
+    </div>
+    <div class="line">
+      {% set rows = platform_rows(lead.metrics) %}
+      {% if rows %}{{ icon(rows[0].platform) }}<span>{{ rows[0].text }}</span>{% else %}<span>No engagement data</span>{% endif %}
+      <span class="spacer"></span>
+      {% if lead.status != 'new' %}<span class="chip tiny">{{ STATUS_LABELS[lead.status] }}</span>{% endif %}
+    </div>
+  </div>
+</div>
 {% endmacro %}
 
 {# A level meter: log scale from 1/32x to 32x my engagement; shaded = my range; tick = me. #}
@@ -40,13 +83,7 @@
 </div>
 {% endmacro %}
 
-{% macro status_select(lead) %}
-<select class="status st-{{ lead.status }}" aria-label="Status" onchange="this.className='status st-'+this.value; updateLead({{ lead.id }}, {status: this.value})">
-  {% for s in STATUSES %}<option value="{{ s }}" {% if lead.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}
-</select>
-{% endmacro %}
-
 {% macro star(lead, style="") %}
-<button type="button" class="star {% if lead.starred %}on{% endif %}" title="Star" style="{{ style }}"
-  onclick="this.classList.toggle('on'); updateLead({{ lead.id }}, {starred: this.classList.contains('on')})">★</button>
+<button type="button" class="star {% if lead.starred %}on{% endif %}" title="Star" aria-label="Star" style="{{ style }}"
+  onclick="event.stopPropagation(); this.classList.toggle('on'); App.updateLead({{ lead.id }}, {starred: this.classList.contains('on')}, this.classList.contains('on') ? 'Starred' : 'Unstarred')">★</button>
 {% endmacro %}

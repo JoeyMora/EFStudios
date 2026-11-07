@@ -17,6 +17,11 @@ class Artist:
     spotify_url: str = ""
     discovered_via: str = ""
     image_url: str = ""
+    gender: str = ""          # female | male | nonbinary (as published, e.g. on MusicBrainz)
+    artist_type: str = ""     # solo | group
+    country: str = ""         # ISO 3166-1 alpha-2 country of origin
+    tags: list[str] = field(default_factory=list)   # descriptor tags (not genres)
+    profiled: bool = False    # MusicBrainz profile already merged in (skip re-fetching)
 
 
 @dataclass

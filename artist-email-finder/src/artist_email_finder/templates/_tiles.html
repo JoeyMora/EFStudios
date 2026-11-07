@@ -1,0 +1,2 @@
+{% import "_ui.html" as ui with context %}
+{% for l in leads %}{{ ui.tile(l, l.match_reason if show_reason else (l.pick_reason or '')) }}{% endfor %}

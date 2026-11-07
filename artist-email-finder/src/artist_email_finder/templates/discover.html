@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Discover{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Who are you <span>looking for?</span></h1>
+  <p>Describe the artists you want to work with. I'll find them, check they're around your level, and dig up their email.</p>
+  <form class="prompt" method="post" action="{{ url_for('run_search') }}" id="promptform">
+    <div class="prompt-inner">
+      <textarea name="prompt" id="prompt" rows="1" placeholder="Find me a female punk rock band…" aria-label="Describe the artists you want" required>{{ search.prompt if search else '' }}</textarea>
+      <button class="primary" title="Search" aria-label="Search">{{ ui.icon('send', 'lg') }}</button>
+    </div>
+  </form>
+  <div class="examples">
+    {% for ex in ['Find me a female punk rock band', 'An Asian artist that sings rock and roll', 'R&B singers in Atlanta at my level', 'Indie bands like Alvvays but smaller', 'Latin trap rappers', 'Bedroom pop artists from the UK'] %}
+    <button type="button" class="sm" data-example="{{ ex }}">{{ ex }}</button>
+    {% endfor %}
+  </div>
+  <div class="aimode">
+    {% if ai_on %}{{ ui.icon('sparkle') }} Smart search is on: prompts are understood by Claude.
+    {% else %}Keyword mode. Add <code class="k">ANTHROPIC_API_KEY</code> to <code class="k">.env</code> for smarter prompt understanding.{% endif %}
+  </div>
+</section>
+
+{% if search %}
+<div class="result-head">
+  <h2>“{{ search.prompt }}”</h2>
+  <span id="search-status"></span>
+</div>
+<div class="chips planchips">
+  {% for c in plan.chips() %}<span class="chip soft">{{ c }}</span>{% endfor %}
+  {% if plan.parsed_by == 'keywords' %}<span class="chip tiny" title="Add an Anthropic key for smarter parsing">keyword match</span>{% endif %}
+</div>
+<div class="tiles" id="results">
+  {% with leads=results, show_reason=True %}{% include "_tiles.html" %}{% endwith %}
+</div>
+{% endif %}
+
+{% if recent %}
+<div class="section-title"><h2>Recent searches</h2></div>
+<div class="recent">
+  {% for r in recent %}
+  <a class="rcard" href="{{ url_for('discover_page', s=r.id) }}">
+    {% if r.images %}<div class="mosaic">{% for img in r.images[:4] %}<img src="{{ img }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endfor %}</div>
+    {% else %}<div class="mosaic empty">{{ ui.icon('discover', 'lg') }}</div>{% endif %}
+    <div class="t">{{ r.prompt }}<small>{{ r.n }} artist{{ '' if r.n == 1 else 's' }}</small></div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<details class="more" id="more">
+  <summary>{{ ui.icon('sparkle') }} More ways to add artists</summary>
+  <div class="grid2" style="margin-top:14px">
+    <form class="panel" method="post" action="{{ url_for('lookup') }}">
+      <h2>Artists you already know</h2>
+      <p class="small muted">One per line. Add handles or links after a comma: <code class="k">Name, @instagram, linktr.ee/name</code>, or paste just a profile link.</p>
+      <textarea name="lines" rows="6" placeholder="Artist One&#10;Artist Two, @artisttwo&#10;https://www.tiktok.com/@artistthree"></textarea>
+      <div style="margin-top:10px"><button class="primary">Look them up</button></div>
+    </form>
+    <form class="panel" method="post" action="{{ url_for('discover') }}">
+      <h2>Browse a genre</h2>
+      <label>Where to look</label>
+      <select name="source" style="width:100%">
+        <option value="musicbrainz">MusicBrainz (no key needed)</option>
+        <option value="spotify" {% if not s.has_spotify %}disabled{% endif %}>Spotify{% if not s.has_spotify %} (needs keys){% endif %}</option>
+        <option value="lastfm" {% if not s.lastfm_api_key %}disabled{% endif %}>Last.fm tag{% if not s.lastfm_api_key %} (needs key){% endif %}</option>
+        <option value="similar" {% if not s.lastfm_api_key %}disabled{% endif %}>Last.fm: similar to an artist{% if not s.lastfm_api_key %} (needs key){% endif %}</option>
+      </select>
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:1"><label>Genre</label><input type="text" name="genre" placeholder="e.g. drill" style="width:100%"></div>
+        <div style="flex:1"><label>City / similar to</label><input type="text" name="area" placeholder="City (MusicBrainz)" style="width:100%"></div>
+      </div>
+      <input type="hidden" name="seed" id="seed-mirror">
+      <div class="row" style="margin-top:12px">
+        <label class="inline"><input type="checkbox" name="only_my_level" {% if has_level %}checked{% else %}disabled{% endif %}> Only my level</label>
+        <label class="inline"><input type="checkbox" name="find_emails" checked> Find emails</label>
+        <input type="number" name="limit" value="25" min="1" max="200" style="width:80px" aria-label="How many">
+        <button class="primary">Start</button>
+      </div>
+    </form>
+  </div>
+</details>
+{% endblock %}
+{% block scripts %}
+<script>
+const ta = document.getElementById('prompt');
+const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'; };
+ta.addEventListener('input', grow); grow();
+ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (ta.value.trim()) document.getElementById('promptform').requestSubmit(); } });
+document.querySelectorAll('[data-example]').forEach(b => b.addEventListener('click', () => { ta.value = b.dataset.example; grow(); document.getElementById('promptform').requestSubmit(); }));
+document.getElementById('promptform').addEventListener('submit', e => {
+  const btn = e.target.querySelector('button'); btn.innerHTML = '<span class="spin" style="border-top-color:#fff"></span>'; btn.disabled = true;
+});
+// "City / similar to" doubles as the seed for Last.fm "similar to".
+document.querySelector('[name=area]').addEventListener('input', e => document.getElementById('seed-mirror').value = e.target.value);
+{% if search %}App.watchSearch({{ search.id }});{% endif %}
+</script>
+{% endblock %}

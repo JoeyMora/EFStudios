@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}For you{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>For you</h1>
+    <p>Artists picked from what you've saved. Save the ones you like and pass on the rest; every swipe sharpens the next batch.</p>
+  </div>
+  <span class="spacer"></span>
+  <form method="post" action="{{ url_for('refresh_picks') }}">
+    <button {% if running %}disabled{% endif %}>{% if running %}<span class="spin"></span> Finding picks…{% else %}{{ ui.icon('refresh') }} Find more{% endif %}</button>
+  </form>
+</div>
+
+{% if picks %}
+<div class="deck-wrap">
+  <div>
+    <div class="deck" id="deck">
+      {% for l in picks|reverse %}
+      {% set rows = platform_rows(l.metrics) %}
+      <div class="card" data-id="{{ l.id }}" data-name="{{ l.name }}">
+        <span class="stamp save">SAVE</span><span class="stamp pass">PASS</span>
+        {% call ui.art(l) %}
+          {{ ui.level_pill(l) }}
+          <div class="cap"><div class="nm">{{ l.name }}</div><div class="gn">{{ ui.genres_text(l) }}{% if l.country %} · {{ l.country|country_name }}{% endif %}</div></div>
+        {% endcall %}
+        <div class="meta">
+          {% if l.pick_reason %}<div class="why-box">{{ ui.icon('sparkle') }} {{ l.pick_reason }}</div>{% endif %}
+          <div>
+            <div class="levelline"><span>{{ ui.level_text(l) }}</span></div>
+            {{ ui.meter(l.level_ratio, l.level_bucket) }}
+          </div>
+          <div class="row" style="font-size:14px">
+            {% if rows %}{{ ui.icon(rows[0].platform) }} {{ rows[0].text }}{% endif %}
+            <span class="spacer"></span>
+            {% if l.best_email %}<span class="dotc {{ l.best_confidence }}"></span> Email found{% else %}<span class="dotc none"></span> <span class="muted">No email yet</span>{% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="deck-actions">
+      <button class="pass" id="btn-pass" title="Pass (←)" aria-label="Pass">{{ ui.icon('x', 'lg') }}</button>
+      <button class="open" id="btn-open" title="Details (↑)" aria-label="Open details">{{ ui.icon('open') }}</button>
+      <button class="save" id="btn-save" title="Save (→)" aria-label="Save">{{ ui.icon('heart', 'lg') }}</button>
+    </div>
+    <div class="kbd"><b>←</b> pass · <b>→</b> save · <b>↑</b> details · or drag the card</div>
+  </div>
+  <div>
+    <h2>Up next</h2>
+    <div class="upnext" id="upnext">
+      {% for l in picks[1:8] %}
+      <div class="u" data-open="{{ l.id }}">{{ ui.avatar(l, 'sm') }}<div class="t"><b>{{ l.name }}</b><small>{{ l.pick_reason }}</small></div></div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% elif running %}
+<div class="empty"><div class="big"><span class="spin" style="width:32px;height:32px;border-width:3px"></span></div>
+  Finding artists you'll like. This takes a minute or two; they'll appear here.</div>
+{% elif not liked %}
+<div class="empty"><div class="big">✨</div>
+  <b>Teach me your taste.</b><br>Star or shortlist a few artists (from <a href="{{ url_for('discover_page') }}">Discover</a> or <a href="{{ url_for('leads') }}">Artists</a>),<br>and I'll find more like them, at your level.</div>
+{% else %}
+<div class="empty"><div class="big">🎧</div>
+  You're all caught up. Press <b>Find more</b> for a fresh batch.</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+{% if running %}window.onJobDone = j => { if (j.kind === 'recommend') location.href = '{{ url_for("for_you", auto=0) }}'; };{% endif %}
+(function () {
+  const deck = document.getElementById('deck');
+  if (!deck) return;
+  const cards = () => [...deck.querySelectorAll('.card')];
+  function layout() {
+    const cs = cards().reverse();  // top card is last in DOM
+    cs.forEach((c, i) => {
+      c.classList.toggle('top', i === 0);
+      c.style.transform = i === 0 ? '' : `translateY(${Math.min(i, 2) * 12}px) scale(${1 - Math.min(i, 2) * .04})`;
+      c.style.opacity = i > 2 ? 0 : 1;
+      c.style.zIndex = 100 - i;
+    });
+    if (!cs.length) location.href = '{{ url_for("for_you", auto=1) }}';
+  }
+  async function act(action) {
+    const c = deck.querySelector('.card.top');
+    if (!c) return;
+    const dir = action === 'save' ? 1 : -1;
+    c.style.transform = `translateX(${dir * 140}%) rotate(${dir * 18}deg)`;
+    c.style.opacity = 0;
+    fetch('/api/pick/' + c.dataset.id, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action})});
+    App.toast((action === 'save' ? 'Saved ' : 'Passed on ') + c.dataset.name);
+    document.querySelector(`#upnext [data-open="${c.dataset.id}"]`)?.remove();
+    setTimeout(() => { c.remove(); layout(); }, 280);
+  }
+  document.getElementById('btn-save').onclick = () => act('save');
+  document.getElementById('btn-pass').onclick = () => act('pass');
+  document.getElementById('btn-open').onclick = () => { const c = deck.querySelector('.card.top'); if (c) App.openDrawer(c.dataset.id); };
+  document.addEventListener('keydown', e => {
+    if (document.getElementById('drawer').classList.contains('on') || e.target.closest('input, textarea')) return;
+    if (e.key === 'ArrowRight') act('save');
+    if (e.key === 'ArrowLeft') act('pass');
+    if (e.key === 'ArrowUp') document.getElementById('btn-open').click();
+  });
+  // Drag to swipe.
+  let start = null, cur = null;
+  deck.addEventListener('pointerdown', e => {
+    cur = e.target.closest('.card.top'); if (!cur) return;
+    start = {x: e.clientX, y: e.clientY}; cur.setPointerCapture(e.pointerId); cur.style.transition = 'none';
+  });
+  deck.addEventListener('pointermove', e => {
+    if (!start || !cur) return;
+    const dx = e.clientX - start.x;
+    cur.style.transform = `translateX(${dx}px) rotate(${dx / 18}deg)`;
+    cur.querySelector('.stamp.save').style.opacity = Math.max(0, Math.min(1, dx / 100));
+    cur.querySelector('.stamp.pass').style.opacity = Math.max(0, Math.min(1, -dx / 100));
+  });
+  deck.addEventListener('pointerup', e => {
+    if (!start || !cur) return;
+    const dx = e.clientX - start.x;
+    cur.style.transition = '';
+    if (Math.abs(dx) > 110) act(dx > 0 ? 'save' : 'pass');
+    else { cur.style.transform = ''; cur.querySelectorAll('.stamp').forEach(s => s.style.opacity = 0); if (Math.abs(dx) < 5) App.openDrawer(cur.dataset.id); }
+    start = cur = null;
+  });
+  layout();
+})();
+</script>
+{% endblock %}

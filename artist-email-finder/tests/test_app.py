@@ -70,9 +70,11 @@ def test_web_pages(tmp_path):
     store = app.config["store"]
     lead_id = store.save_artist(Artist(name="Lil Nova", genres=["trap"]))
     c = app.test_client()
-    for path in ("/", "/find", "/settings", f"/lead/{lead_id}", "/api/jobs", "/export.csv"):
+    assert c.get("/").status_code == 302
+    for path in ("/discover", "/for-you", "/artists", "/pipeline", "/settings", f"/lead/{lead_id}",
+                 f"/lead/{lead_id}/drawer", "/api/jobs", "/export.csv"):
         assert c.get(path).status_code == 200, path
-    assert b"Lil Nova" in c.get("/").data
+    assert b"Lil Nova" in c.get("/artists").data
 
     assert c.post(f"/api/lead/{lead_id}", json={"status": "contacted", "starred": True}).status_code == 200
     lead = store.lead(lead_id)
@@ -88,10 +90,9 @@ def test_web_pages(tmp_path):
     assert store.my_metrics() == {"instagram_reel_engagement": 300}
     assert store.lead(lead_id)["level_bucket"] == "match"
     assert "8.1%" in c.get(f"/lead/{lead_id}").data.decode()   # 250 / 3,100 followers
-    for view in ("cards", "board", "list"):
-        page = c.get(f"/?view={view}&level=").data.decode()
-        assert "Lil Nova" in page and "Where your leads sit" in page, view
-    assert 'class="mini" draggable="true"' in c.get("/?view=board").data.decode()
+    assert 'class="tile' in c.get("/artists").data.decode()
+    page = c.get("/pipeline").data.decode()
+    assert 'class="mini" draggable="true"' in page and "Where your leads sit" in page
     page = c.get(f"/lead/{lead_id}").data.decode()
     assert "mailto:nova@mgmt.co?subject=Hi%20Lil%20Nova&amp;body=Yo%20Lil" in page
 
@@ -182,10 +183,11 @@ def test_map_points_and_meters(tmp_path):
     store.save_artist(Artist(name="Peer", metrics={"tiktok_views": 2000}, image_url="https://i.scdn.co/x.jpg"))
     store.save_artist(Artist(name="Star", metrics={"tiktok_views": 500_000}))
     store.save_artist(Artist(name="Mystery"))
-    page = c.get("/?level=").data.decode()
+    page = c.get("/pipeline").data.decode()
     points = json.loads(re.search(r'<script id="points" type="application/json">(.*?)</script>', page, re.S).group(1))
     assert {p["name"]: p["bucket"] for p in points} == {"Peer": "match", "Star": "bigger"}
-    assert "1 artist with unknown engagement not shown" in page
+    assert "1 with unknown engagement not shown" in page
     assert 'src="https://i.scdn.co/x.jpg"' in page
     # Peer at 2x sits right of center on the 1/32x..32x meter: (log 2 / log 32 + 1) / 2 = 60%
-    assert "left:60.0%" in page
+    peer = store.find_lead(name="Peer")["id"]
+    assert "left:60.0%" in c.get(f"/lead/{peer}/drawer").data.decode()

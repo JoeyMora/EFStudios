@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Pipeline{% endblock %}
+{% block content %}
+{% set stage_colors = {'new': 'var(--stage-1)', 'shortlist': 'var(--stage-2)', 'contacted': 'var(--stage-3)', 'replied': 'var(--stage-4)', 'not_a_fit': 'var(--stage-off)'} %}
+<div class="page-head">
+  <div><h1>Pipeline</h1><p>Drag artists between stages as you reach out.</p></div>
+</div>
+
+<div class="kpis">
+  {% for s in ['new', 'shortlist', 'contacted', 'replied'] %}
+  <div class="kpi"><div class="v">{{ counts.get(s, 0) }}</div><div class="k"><span class="swatch" style="background:{{ stage_colors[s] }}"></span>{{ STATUS_LABELS[s] }}</div></div>
+  {% endfor %}
+  {% set reached = counts.get('contacted', 0) + counts.get('replied', 0) %}
+  <div class="kpi"><div class="v">{{ ((100 * counts.get('replied', 0) / reached)|round|int ~ '%') if reached else '–' }}</div><div class="k">reply rate</div></div>
+</div>
+
+<div class="board">
+  {% for s in STATUSES %}
+  {% set col = leads|selectattr('status', 'equalto', s)|list %}
+  <div class="col" data-status="{{ s }}">
+    <h3><span class="swatch" style="background:{{ stage_colors[s] }}"></span>{{ STATUS_LABELS[s] }} <span class="n">{{ col|length }}</span></h3>
+    {% for l in col %}
+    <div class="mini" draggable="true" data-id="{{ l.id }}">
+      {{ ui.avatar(l, 'sm') }}
+      <div class="t"><b>{{ l.name }}</b>
+        <small>{% if l.best_email %}<span class="dotc {{ l.best_confidence }}"></span>{% else %}<span class="dotc none"></span>{% endif %}{{ l.genre_list[0] if l.genre_list else 'genre unknown' }}{% if l.level_ratio is not none %} · {{ l.level_ratio|ratio }}{% endif %}</small></div>
+      {% if l.starred %}<span style="color:#f5b400">★</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="panel" style="margin-top:18px">
+  <div class="chart-head">
+    <h2>Where your leads sit</h2>
+    <div class="legend">
+      <span><i style="background:var(--series-1)"></i>your level</span>
+      <span><i style="background:var(--muted-mark)"></i>bigger / smaller</span>
+      <span><i class="band"></i>your range ({{ band_low|ratio }}–{{ band_high|ratio }})</span>
+    </div>
+  </div>
+  {% if points %}
+  <svg id="map" role="img" aria-label="Scatter of {{ points|length }} artists: engagement compared with yours against email confidence"></svg>
+  <p class="small muted" style="margin:6px 0 0">Left to right: engagement compared with yours. Bottom to top: how sure the email is. The best targets sit in the shaded band, near the top. Click a dot to open the artist.{% if unknown %} {{ unknown }} with unknown engagement not shown.{% endif %}</p>
+  {% else %}
+  <div class="empty" style="padding:30px">Artists show up here once their engagement is known{% if not has_level %} and you've set yours in <a href="{{ url_for('settings_page') }}">Settings</a>{% endif %}.</div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script id="points" type="application/json">{{ points|tojson }}</script>
+<script>
+document.body.dataset.refreshOnClose = '1';
+/* drag & drop between stages */
+document.querySelectorAll('.mini').forEach(card => {
+  card.addEventListener('dragstart', e => { card.classList.add('dragging'); card.dataset.dragged = '1'; e.dataTransfer.setData('text/plain', card.dataset.id); });
+  card.addEventListener('dragend', () => { card.classList.remove('dragging'); setTimeout(() => delete card.dataset.dragged, 50); });
+});
+document.querySelectorAll('.col').forEach(col => {
+  col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
+  col.addEventListener('dragleave', () => col.classList.remove('over'));
+  col.addEventListener('drop', async e => {
+    e.preventDefault(); col.classList.remove('over');
+    const id = e.dataTransfer.getData('text/plain');
+    const card = document.querySelector(`.mini[data-id="${id}"]`);
+    if (!card || card.parentElement === col) return;
+    col.appendChild(card);
+    await App.updateLead(id, {status: col.dataset.status}, 'Moved to ' + col.querySelector('h3').childNodes[1].textContent.trim());
+    document.querySelectorAll('.col').forEach(c => c.querySelector('h3 .n').textContent = c.querySelectorAll('.mini').length);
+  });
+});
+
+/* level map: x = engagement vs me (log, 1/32x..32x), y = email confidence */
+(function () {
+  const svg = document.getElementById('map');
+  if (!svg) return;
+  const pts = JSON.parse(document.getElementById('points').textContent);
+  const tip = document.getElementById('tip');
+  const NS = 'http://www.w3.org/2000/svg', SPAN = Math.log(32), BAND = [{{ band_low }}, {{ band_high }}];
+  const el = (n, a) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); svg.appendChild(e); return e; };
+  const fmt = r => r >= 10 ? r.toFixed(0) + '×' : r >= 1 ? r.toFixed(1) + '×' : r.toFixed(2) + '×';
+  function draw() {
+    svg.innerHTML = '';
+    const W = svg.clientWidth, H = svg.clientHeight, m = {l: 64, r: 14, t: 14, b: 26};
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const x = r => m.l + Math.min(1, Math.max(0, (Math.log(r) / SPAN + 1) / 2)) * iw;
+    const y = s => m.t + ih - (s ? 14 + (s / 100) * (ih - 14) : 4);
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    el('rect', {class: 'bandrect', x: x(BAND[0]), y: m.t, width: x(BAND[1]) - x(BAND[0]), height: ih, rx: 6});
+    for (const [s, label] of [[100, 'certain'], [80, 'high'], [55, 'medium'], [0, 'no email']]) {
+      if (s) el('line', {class: 'grid', x1: m.l, x2: m.l + iw, y1: y(s), y2: y(s)});
+      el('text', {x: m.l - 8, y: y(s) + 4, 'text-anchor': 'end'}).textContent = label;
+    }
+    el('line', {class: 'you', x1: x(1), x2: x(1), y1: m.t, y2: m.t + ih});
+    for (const [r, label] of [[1/32, '1/32×'], [1/4, '¼×'], [1, 'you'], [4, '4×'], [32, '32×']])
+      el('text', {x: x(r), y: H - 8, 'text-anchor': r === 1/32 ? 'start' : r === 32 ? 'end' : 'middle'}).textContent = label;
+    for (const p of pts.slice().sort((a, b) => (a.bucket === 'match') - (b.bucket === 'match'))) {
+      const jitter = ((p.id * 2654435761) % 1000) / 1000 - .5;
+      const cy = y(p.score) + (p.score ? 0 : jitter * 6);
+      const c = el('circle', {class: 'dot ' + (p.bucket === 'match' ? 'in' : 'out'), cx: x(p.r), cy, r: 5});
+      const hit = el('circle', {cx: x(p.r), cy, r: 11, fill: 'transparent', style: 'cursor:pointer'});
+      hit.addEventListener('mouseenter', () => {
+        c.classList.add('hl');
+        tip.innerHTML = `<b>${App.esc(p.name)}</b><br>${fmt(p.r)} your engagement<br>${p.email ? App.esc(p.email) + ' · ' + App.esc(p.conf) : 'no email yet'}<br><span class="muted">${App.esc(p.status)}</span>`;
+        tip.style.display = 'block';
+      });
+      hit.addEventListener('mousemove', e => { tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; });
+      hit.addEventListener('mouseleave', () => { c.classList.remove('hl'); tip.style.display = 'none'; });
+      hit.addEventListener('click', () => App.openDrawer(p.id));
+    }
+  }
+  draw(); addEventListener('resize', draw);
+})();
+</script>
+{% endblock %}

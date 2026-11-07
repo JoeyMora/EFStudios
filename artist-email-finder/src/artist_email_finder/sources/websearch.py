@@ -55,8 +55,10 @@ class WebSearch:
         query = f'"{artist_name}" (booking OR management OR contact OR inquiries) email'
         findings: list[Finding] = []
         urls: list[str] = []
+        self.last_texts: list[str] = []
         for r in self.search(query):
             text = f"{r['title']} {r['snippet']}"
+            self.last_texts.append(text)
             for email in emails_from_text(text):
                 findings.append(Finding(email, "web_search", r["url"],
                                         context_for(email, text), on_artist_page=False))

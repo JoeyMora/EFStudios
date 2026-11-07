@@ -1,16 +1,24 @@
 # EF Studios Artist Finder
 
-Finds artists at your engagement level to reach out to, along with their public booking or management emails. You work through them in a local web app.
+An app for finding artists to work with, at your level, with their booking or management emails.
 
-- **Find artists:** by genre (Spotify, Last.fm, MusicBrainz), by city (MusicBrainz), or "similar to" an artist you name (Last.fm). You can also paste a list of artists you already know.
-- **"Around my level", based on engagement:** enter how much engagement your typical post gets. Every artist's typical post is compared with yours (for example, `1.8×`), and discovery keeps only artists in your range. Follower counts are shown for context but never used for level.
-- **Find emails:** from their website, Linktree-style pages, Instagram and TikTok (see below), YouTube descriptions and web search. Each email gets a confidence rating.
-- **Work through leads visually:**
-  - **Cards** with artist photos, a level meter and per-platform engagement meters.
-  - **"Where your leads sit" map:** engagement compared with yours, against email confidence. The best targets sit top-middle.
-  - **Pipeline overview**, plus a **Board** where you drag artists between New → Shortlist → Contacted → Replied / Not a fit.
-  - A **List** view for bulk actions.
-  - Notes, copy an email, open a pre-filled email from your template, and export to CSV.
+- **Discover: just ask.** Type what you want, for example "find me a female punk rock band", "an Asian artist that sings rock and roll", or "R&B singers in Atlanta at my level". The app works out the genres, gender, solo or band, region, city and level you mean, searches the music databases, keeps only artists that fit, and finds their emails. Results stream in as photo tiles, each showing why it matched.
+- **For you.** Picks based on the artists you star, shortlist, contact or reply to, and steered away from the ones you mark "not a fit". Swipe through them like a deck: save (→) or pass (←). Every swipe teaches it your taste.
+- **Every artist has a genre.** Genres come from MusicBrainz, then Spotify, then Last.fm listener tags. If none of those know the artist, Claude reads their own bio and link pages. You can always edit the genres.
+- **Around your level, based on engagement.** Instagram reel views and likes, TikTok views and YouTube views are compared with your own numbers. Follower counts are shown, but never used for level.
+- **Works like an app:**
+  - Tap any artist for a slide-in panel with photo, level, "you vs them" bars, emails, notes and a one-tap pre-filled email.
+  - Drag artists through your **Pipeline**: New → Shortlist → Contacted → Replied.
+  - A level map shows where everyone sits.
+
+### How prompts are understood
+
+With an `ANTHROPIC_API_KEY`, Claude turns your prompt into a search plan. It uses Claude Opus 5.5 at low effort, a few cents per search. Without a key, a keyword parser handles the common cases.
+
+Identity filters only use what artists publish about themselves:
+- **Gender and solo vs band:** the gender and type listed on MusicBrainz.
+- **Region:** the country of origin and area listed on MusicBrainz, plus self-identification tags like "asian american".
+- **Nothing is inferred from names or photos.** Artists whose details aren't published are kept and ranked lower, rather than guessed about.
 
 ## Quick start
 
@@ -24,9 +32,10 @@ artist-email-finder serve
 
 This opens http://127.0.0.1:5005. Your leads are saved in `leads.db` in the folder you run it from.
 
-1. **My level & settings:** enter your typical engagement, or fill it in automatically (see below). Then edit your email template.
-2. **Find artists:** pick a source and genre, keep "Only artists around my level" ticked, and press Start. Progress shows in the top bar.
-3. **Leads:** go through the list, closest to your engagement first.
+1. **Settings:** set your own engagement (capture your Reels tab and press **This is me**), and edit your email template.
+2. **Discover:** describe who you're looking for.
+3. **Artists / Pipeline:** star the ones you like and move them along as you reach out.
+4. **For you:** after a few stars or shortlists, swipe through picks made for you.
 
 ## Instagram & TikTok
 
@@ -53,6 +62,7 @@ The limit is about 200 lookups per hour. When the token expires, lookups quietly
 
 | Key | Unlocks | Where |
 |---|---|---|
+| `ANTHROPIC_API_KEY` | Smart prompt search, genre detection from bios, AI suggestions in "For you" | console.anthropic.com |
 | `META_ACCESS_TOKEN`, `IG_USER_ID` | Instagram reel likes + comments, bio, website, followers, profile photo | see above |
 | `BRAVE_API_KEY` or `SERPAPI_API_KEY` | Web search for emails, plus Instagram/TikTok profile snippets | brave.com/search/api, serpapi.com |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | Discover by genre, Spotify followers | developer.spotify.com/dashboard |
@@ -83,7 +93,7 @@ Medians keep one viral post from skewing the number. Instagram is measured on re
 - **TikTok:** open your own profile, click **Capture artist**, then **This is me**.
 - **Anything else:** type the numbers in.
 
-Followers, Spotify and Last.fm numbers are still shown as context. The Leads list also shows the Instagram engagement rate (engagement ÷ followers). A rate under 1% is flagged, because it often means bought followers.
+Followers, Spotify and Last.fm numbers are still shown as context. Each artist panel also shows the Instagram engagement rate (engagement ÷ followers). A rate under 1% is flagged, because it often means bought followers.
 
 Engagement is only known after an artist is looked up. So with "Only artists around my level" on, discovery looks each artist up and then keeps or skips them. Skipped artists are saved, so they're never checked twice, and they appear under the "Bigger" and "Smaller" filters. Artists whose engagement couldn't be measured are kept and shown as `?`. To capture their TikTok or enter numbers by hand, use the bookmarklet or the artist page. Spotify lists popular artists first, so the optional "skip artists with more than N Spotify followers" field saves time on superstars.
 

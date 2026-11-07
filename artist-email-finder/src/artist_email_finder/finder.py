@@ -6,7 +6,9 @@ import logging
 import re
 from urllib.parse import urlparse
 
+from . import ai
 from .config import Settings
+from .genres import merge as merge_genres, split_tags
 from .extract import context_for, emails_from_text
 from .models import Artist, ArtistResult, Finding
 from .net import HttpClient
@@ -104,17 +106,26 @@ class Finder:
         if artist.spotify_url:
             add_links([artist.spotify_url])
 
-        # 1. Links the artist has listed publicly (MusicBrainz).
-        if self.musicbrainz and artist.discovered_via != "musicbrainz":
-            mb_links = self.musicbrainz.find_links(artist.name)
-            if mb_links:
-                result.notes.append(f"musicbrainz: {len(mb_links)} links")
-            add_links(mb_links)
+        texts: list[str] = []  # bios and snippets, for genre inference
+
+        # 1. Public profile: links, genres, gender, solo/group, country (MusicBrainz).
+        if self.musicbrainz and not artist.profiled and artist.discovered_via != "musicbrainz":
+            prof = self.musicbrainz.profile(artist.name)
+            if prof:
+                result.notes.append(f"musicbrainz: {len(prof['urls'])} links")
+                add_links(prof["urls"])
+                artist.genres = merge_genres(artist.genres, prof["genres"])
+                artist.tags = merge_genres(artist.tags, prof["tags"], limit=10)
+                for key in ("gender", "artist_type", "country", "location"):
+                    if prof.get(key) and not getattr(artist, key):
+                        setattr(artist, key, prof[key])
+                texts.append(prof.get("disambiguation", ""))
 
         # 2. General web search.
         if self.web_search:
             ws_findings, ws_urls = self.web_search.find(artist.name)
             findings.extend(ws_findings)
+            texts.extend(getattr(self.web_search, "last_texts", []))
             add_links(u for u in ws_urls
                       if _url_mentions_artist(u, artist.name)
                       and (classify(u) != "website" or is_artist_site_candidate(u)
@@ -129,6 +140,7 @@ class Finder:
                     result.metrics[key] = info[key]
             if info.get("image_url"):
                 result.image_url = info["image_url"]
+            texts.append(info.get("bio", ""))
 
         # 4. Instagram and TikTok.
         ig = next((h for h in map(instagram_handle, links) if h), "")
@@ -160,6 +172,7 @@ class Finder:
                     tt = tt or prof["handle"]
                 if prof["followers"] is not None:
                     result.metrics[f"{platform}_followers"] = prof["followers"]
+                texts.append(prof["text"])
                 for email in emails_from_text(prof["text"]):
                     findings.append(Finding(email, "social_bio", prof["url"],
                                             context_for(email, prof["text"])))
@@ -206,8 +219,16 @@ class Finder:
             info = self.lastfm.info(artist.name)
             if info.get("listeners") is not None:
                 result.metrics["lastfm_listeners"] = info["listeners"]
-            if not artist.genres and info.get("tags"):
-                artist.genres = info["tags"][:5]
+
+        # 7. Genre: databases first, listener tags next, AI reading their bio last.
+        if self.lastfm and len(artist.genres) < 2:
+            g, other = split_tags(self.lastfm.top_tags(artist.name))
+            artist.genres = merge_genres(artist.genres, g)
+            artist.tags = merge_genres(artist.tags, other, limit=10)
+        if not artist.genres:
+            artist.genres = ai.infer_genres(artist.name, texts)
+            if artist.genres:
+                result.notes.append("genre inferred from bio")
 
         site_domains = {host_of(l) for l in crawled if classify(l) == "website"}
         result.website = (next((l for l in links if classify(l) == "website"

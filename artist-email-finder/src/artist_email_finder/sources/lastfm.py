@@ -51,3 +51,20 @@ class LastFm:
         data = self._get("artist.getsimilar", artist=seed, limit=limit, autocorrect=1)
         for a in (data.get("similarartists") or {}).get("artist") or []:
             yield Artist(name=a["name"], discovered_via=f"lastfm: similar to {seed}")
+
+    def similar_scored(self, seed: str, limit: int = 40) -> list[tuple[str, float]]:
+        """[(name, match 0-1)] for artists similar to seed."""
+        data = self._get("artist.getsimilar", artist=seed, limit=limit, autocorrect=1)
+        out = []
+        for a in (data.get("similarartists") or {}).get("artist") or []:
+            try:
+                out.append((a["name"], float(a.get("match") or 0)))
+            except (KeyError, ValueError):
+                continue
+        return out
+
+    def top_tags(self, name: str) -> list[str]:
+        """Listener tags for an artist, most-used first (genres and descriptors mixed)."""
+        data = self._get("artist.gettoptags", artist=name, autocorrect=1)
+        tags = (data.get("toptags") or {}).get("tag") or []
+        return [t["name"].lower() for t in tags if int(t.get("count") or 0) >= 5][:15]
