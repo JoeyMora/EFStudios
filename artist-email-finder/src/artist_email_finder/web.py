@@ -16,7 +16,10 @@ from .config import Settings
 from .counts import followers_in, parse_count
 from .extract import context_for, emails_from_text
 from .jobs import JobRunner
-from .level import AUDIENCE, ENGAGEMENT, METRICS, describe, engagement_rate, typical
+import math
+
+from .level import (AUDIENCE, ENGAGEMENT, METRICS, PLATFORMS, describe, engagement_rate,
+                    platform_ratios, typical)
 from .models import Artist, ArtistResult, EmailResult, Finding
 from .net import HttpClient
 from .scoring import rank
@@ -46,12 +49,47 @@ def compact(n) -> str:
     return str(n)
 
 
+METER_SPAN = 32  # level meters run from 1/32x to 32x my engagement, log scale
+
+
+def meter_pos(r) -> float:
+    """Position (0-100%) of a ratio on a level meter."""
+    if r is None:
+        return 50.0
+    x = (math.log(max(r, 1e-9)) / math.log(METER_SPAN) + 1) / 2
+    return round(min(1.0, max(0.0, x)) * 100, 2)
+
+
+PLATFORM_LABELS = {"instagram": "Instagram", "tiktok": "TikTok", "youtube": "YouTube"}
+
+
+def platform_rows(metrics: dict, mine: dict) -> list[dict]:
+    """One row per platform the artist has engagement on, for the card meters."""
+    per = platform_ratios(metrics, mine)
+    rows = []
+    for platform, keys in PLATFORMS.items():
+        parts = []
+        for key in keys:
+            if metrics.get(key) is not None:
+                unit = {"instagram_reel_views": "views / reel",
+                        "instagram_reel_engagement": "likes+comments / reel",
+                        "tiktok_views": "views / video", "youtube_views": "views / video"}[key]
+                parts.append(f"{compact(metrics[key])} {unit}")
+        if parts:
+            r = per.get(platform)
+            rows.append({"platform": platform, "label": PLATFORM_LABELS[platform],
+                         "text": parts[0], "detail": " · ".join(parts), "ratio": r,
+                         "pos": meter_pos(r) if r is not None else None})
+    return rows
+
+
 def fill(template: str, lead: dict) -> str:
     first = lead["name"].split()[0] if lead["name"].split() else lead["name"]
     return (template or "").replace("{artist}", lead["name"]).replace("{first_name}", first)
 
 
-def ingest_capture(store: Store, url: str, title: str, text: str) -> tuple[int, list[str], dict]:
+def ingest_capture(store: Store, url: str, title: str, text: str,
+                   image_url: str = "") -> tuple[int, list[str], dict]:
     """Save a profile the user captured with the bookmarklet (or pasted).
 
     Returns (lead_id, new_emails, metrics)."""
@@ -73,6 +111,9 @@ def ingest_capture(store: Store, url: str, title: str, text: str) -> tuple[int, 
     views = video_views(text)
     if views is not None and platform == "tiktok":
         metrics["tiktok_views"] = views
+    reel_views = video_views(text, "REEL_VIEWS")
+    if reel_views is not None and platform == "instagram":
+        metrics["instagram_reel_views"] = reel_views
     text = VIEWS_LINE_RE.sub("", text)
     bio_links = []
     for m in BIO_LINK_RE.finditer(text or ""):
@@ -82,6 +123,7 @@ def ingest_capture(store: Store, url: str, title: str, text: str) -> tuple[int, 
 
     artist_name = existing["name"] if existing else name
     artist = Artist(name=artist_name, links=[url] + bio_links, metrics=metrics,
+                    image_url=image_url if image_url.startswith("https://") else "",
                     discovered_via="captured" if not existing else existing["discovered_via"])
     result = ArtistResult(artist=artist, instagram=ig, tiktok=tt, metrics=metrics,
                           links=[url] + bio_links, emails=rank(findings, artist_name, set()))
@@ -89,12 +131,13 @@ def ingest_capture(store: Store, url: str, title: str, text: str) -> tuple[int, 
     return lead_id, [e.email for e in result.emails], metrics
 
 
-VIEWS_LINE_RE = re.compile(r"^VIDEO_VIEWS:(.*)$", re.MULTILINE)
+VIEWS_LINE_RE = re.compile(r"^(?:VIDEO|REEL)_VIEWS:(.*)$", re.MULTILINE)
 
 
-def video_views(text: str) -> int | None:
-    """Median of the 'VIDEO_VIEWS: 1.2K | 980 | ...' line the bookmarklet sends."""
-    m = VIEWS_LINE_RE.search(text or "")
+def video_views(text: str, key: str = "VIDEO_VIEWS") -> int | None:
+    """Median of the 'VIDEO_VIEWS: 1.2K | 980 | ...' (TikTok) or 'REEL_VIEWS: ...'
+    (Instagram Reels tab) line the bookmarklet sends."""
+    m = re.search(rf"^{key}:(.*)$", text or "", re.MULTILINE)
     if not m:
         return None
     return typical(parse_count(v) for v in m.group(1).split("|") if v.strip())
@@ -115,8 +158,14 @@ def bookmarklet(base_url: str) -> str:
         "g('[data-e2e=\"user-subtitle\"]'),g('[data-e2e=\"user-bio\"]'),f?f+' Followers':'',"
         "g('[data-e2e=\"user-link\"]'),vw.length?'VIDEO_VIEWS: '+vw.join(' | '):''].join('\\n')}"
         "else{t=g('meta[name=\"description\"]')+'\\n'+document.body.innerText}"
+        # Instagram Reels tab: the view count shown on each reel tile, pinned skipped.
+        "if(/instagram\\.com/.test(h)){let rv=[...document.querySelectorAll('a[href*=\"/reel/\"]')]"
+        ".filter(a=>!a.querySelector('svg[aria-label*=\"inned\"]'))"
+        ".map(a=>(a.innerText.split('\\n').map(x=>x.trim()).find(x=>/^[0-9][0-9.,]*[KkMm]?$/.test(x))))"
+        ".filter(Boolean).slice(0,12);if(rv.length)t+='\\nREEL_VIEWS: '+rv.join(' | ')}"
         f"window.open('{base_url}capture?url='+encodeURIComponent(location.href)"
         "+'&title='+encodeURIComponent(document.title)"
+        "+'&img='+encodeURIComponent(g('meta[property=\"og:image\"]'))"
         "+'&text='+encodeURIComponent(t.slice(0,5000)),'_blank')})()"
     )
     return "javascript:" + quote(js, safe="(){}[];:,'=!+.?/|&<>\\-_*\"")
@@ -137,6 +186,15 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
     app.jinja_env.globals.update(STATUSES=STATUSES, STATUS_LABELS=STATUS_LABELS, METRICS=METRICS,
                                  ENGAGEMENT=ENGAGEMENT, AUDIENCE=AUDIENCE)
     app.jinja_env.filters["eng_rate"] = engagement_rate
+    app.jinja_env.filters["meterpos"] = meter_pos
+
+    @app.context_processor
+    def level_context():
+        low, high = store.band()
+        mine = store.my_metrics()
+        return {"band_low": low, "band_high": high, "band_l": meter_pos(low),
+                "band_h": meter_pos(high), "my": mine,
+                "platform_rows": lambda m: platform_rows(m, mine)}
 
     def current_filters() -> dict:
         f = {k: request.args.get(k, "") for k in FILTER_KEYS}
@@ -153,12 +211,27 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
         f = current_filters()
         page = max(1, request.args.get("page", 1, type=int))
         per_page = 100
-        rows, total = store.leads(**{**f, "starred": f["starred"] == "1"},
-                                  limit=per_page, offset=(page - 1) * per_page)
+        view = request.args.get("view", "cards")
+        if view not in ("cards", "board", "list"):
+            view = "cards"
+        query = {**f, "starred": f["starred"] == "1"}
+        if view == "board":  # every status gets a column
+            query["status"] = ""
+            per_page = 1000
+        rows, total = store.leads(**query, limit=per_page, offset=(page - 1) * per_page)
+        # The map shows every lead that matches the other filters, at any level.
+        everything, _ = store.leads(**{**query, "level": ""}, limit=3000)
+        points = [{"id": r["id"], "name": r["name"], "r": r["level_ratio"],
+                   "score": r["best_score"], "email": r["best_email"],
+                   "conf": r["best_confidence"], "status": STATUS_LABELS[r["status"]],
+                   "img": r["image_url"], "bucket": r["level_bucket"]}
+                  for r in everything if r["level_ratio"] is not None]
+        unknown = sum(1 for r in everything if r["level_ratio"] is None)
         args = {k: v for k, v in f.items() if v}
         return render_template("leads.html", leads=rows, total=total, f=f, page=page,
                                pages=max(1, -(-total // per_page)), counts=store.counts(),
-                               has_level=bool(store.my_metrics()), args=args,
+                               has_level=bool(store.my_metrics()), args=args, view=view,
+                               points=points, unknown=unknown,
                                export_url=url_for("export") + "?" + urlencode(args))
 
     @app.get("/export.csv")
@@ -315,7 +388,8 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
         url, text = values.get("url", ""), values.get("text", "")
         if not url:
             return redirect(url_for("settings_page") + "#capture")
-        lead_id, emails, metrics = ingest_capture(store, url, values.get("title", ""), text)
+        lead_id, emails, metrics = ingest_capture(store, url, values.get("title", ""), text,
+                                                  values.get("img", ""))
         row = store.lead(lead_id)
         queued = False
         if not emails and any(l for l in row["links"] if "instagram.com" not in l
@@ -357,8 +431,8 @@ def create_app(db_path: str = "leads.db", settings: Settings | None = None,
             graph = InstagramGraph(http, settings.meta_access_token, settings.ig_user_id,
                                    settings.graph_api_version)
             _, info = graph.find(ig)
-            if info.get("instagram_engagement") is not None:
-                values["my_instagram_engagement"] = str(info["instagram_engagement"])
+            if info.get("instagram_reel_engagement") is not None:
+                values["my_instagram_reel_engagement"] = str(info["instagram_reel_engagement"])
             else:
                 notes.append("Couldn't read your Instagram posts (check the handle and Meta keys)")
         if yt and settings.youtube_api_key:

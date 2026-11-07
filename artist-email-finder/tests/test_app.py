@@ -12,15 +12,15 @@ from artist_email_finder.web import bookmarklet, create_app, ingest_capture
 @pytest.fixture
 def store(tmp_path):
     s = Store(tmp_path / "leads.db")
-    s.save_settings({"my_instagram_engagement": "400", "my_tiktok_views": "3000"})
+    s.save_settings({"my_instagram_reel_engagement": "400", "my_tiktok_views": "3000"})
     return s
 
 
 def test_store_merges_and_levels(store):
-    a = Artist(name="Lil Nova", metrics={"instagram_followers": 10_000, "instagram_engagement": 800})
+    a = Artist(name="Lil Nova", metrics={"instagram_followers": 10_000, "instagram_reel_engagement": 800})
     lead_id = store.save_artist(a)
     store.update_lead(lead_id, status="shortlist", notes="great hooks")
-    result = ArtistResult(artist=a, instagram="LilNova", metrics={"instagram_engagement": 960},
+    result = ArtistResult(artist=a, instagram="LilNova", metrics={"instagram_reel_engagement": 960},
                           emails=[EmailResult("booking@lilnova.com", 85, "high", ["website"], ["u"])])
     assert store.save_artist(Artist(name="lil nova"), result) == lead_id
     lead = store.lead(lead_id)
@@ -29,16 +29,16 @@ def test_store_merges_and_levels(store):
     assert lead["best_email"] == "booking@lilnova.com"
     assert lead["level_bucket"] == "match" and round(lead["level_ratio"], 1) == 2.4
 
-    store.save_artist(Artist(name="Megastar", metrics={"instagram_engagement": 90_000}))
+    store.save_artist(Artist(name="Megastar", metrics={"instagram_reel_engagement": 90_000}))
     # Lots of followers but little engagement: still my level.
     store.save_artist(Artist(name="Inflated", metrics={"instagram_followers": 900_000,
-                                                       "instagram_engagement": 300}))
+                                                       "instagram_reel_engagement": 300}))
     rows, total = store.leads(level="match")
     assert sorted(r["name"] for r in rows) == ["Inflated", "Lil Nova"]
     rows, _ = store.leads(level="bigger")
     assert [r["name"] for r in rows] == ["Megastar"]
     # Changing my numbers re-buckets everyone.
-    store.save_settings({"my_instagram_engagement": "50000"})
+    store.save_settings({"my_instagram_reel_engagement": "50000"})
     assert store.lead(lead_id)["level_bucket"] == "smaller"
 
 
@@ -82,10 +82,10 @@ def test_web_pages(tmp_path):
     lead = store.lead(lead_id)
     assert lead["best_email"] == "nova@mgmt.co" and lead["metrics"]["instagram_followers"] == 3100
 
-    c.post(f"/lead/{lead_id}", data={"instagram_engagement": "250"})
-    c.post("/settings", data={"my_instagram_engagement": "300", "level_low": "0.5", "level_high": "2",
+    c.post(f"/lead/{lead_id}", data={"instagram_reel_engagement": "250"})
+    c.post("/settings", data={"my_instagram_reel_engagement": "300", "level_low": "0.5", "level_high": "2",
                               "email_subject": "Hi {artist}", "email_body": "Yo {first_name}"})
-    assert store.my_metrics() == {"instagram_engagement": 300}
+    assert store.my_metrics() == {"instagram_reel_engagement": 300}
     assert store.lead(lead_id)["level_bucket"] == "match"
     assert "8.1%" in c.get("/?level=").data.decode()   # 250 / 3,100 followers
     page = c.get(f"/lead/{lead_id}").data.decode()
@@ -118,9 +118,9 @@ def test_discover_job_keeps_only_my_level(store, monkeypatch):
         Artist("Tiny", discovered_via="spotify"),
         Artist("Peer2", discovered_via="spotify"),
     ]
-    finder = FakeFinder({"BigButQuiet": {"instagram_engagement": 350},
-                         "Peer": {"tiktok_views": 5000}, "Tiny": {"instagram_engagement": 4},
-                         "Peer2": {"instagram_engagement": 900}})
+    finder = FakeFinder({"BigButQuiet": {"instagram_reel_engagement": 350},
+                         "Peer": {"tiktok_views": 5000}, "Tiny": {"instagram_reel_engagement": 4},
+                         "Peer2": {"instagram_reel_engagement": 900}})
     runner = JobRunner(store, Settings(), finder_factory=lambda http: finder)
     monkeypatch.setattr(runner, "_candidates", lambda params, http: iter(candidates))
     job_id = runner.submit("discover", {"source": "spotify", "genre": "trap", "limit": 3,
@@ -149,3 +149,22 @@ def test_capture_me_sets_my_level(tmp_path):
     c.post("/capture/me", data={"lead_id": lead_id})
     assert store.my_metrics() == {"tiktok_views": 950}
     assert store.lead(lead_id) is None
+
+
+def test_capture_instagram_reels_tab(store):
+    store.save_settings({"my_instagram_reel_views": "5000"})
+    lead_id, _, metrics = ingest_capture(
+        store, "https://www.instagram.com/lilnova/reels/", "Lil Nova (@lilnova) • Instagram reels",
+        "REEL_VIEWS: 4.1K | 6K | 3.9K | 1.2M | 5.5K", "https://cdn.example/pic.jpg")
+    assert metrics == {"instagram_reel_views": 5500}
+    lead = store.lead(lead_id)
+    assert lead["instagram"] == "lilnova" and lead["image_url"] == "https://cdn.example/pic.jpg"
+    assert lead["level_bucket"] == "match"
+
+
+def test_instagram_counts_once_per_platform():
+    from artist_email_finder.level import ratio
+    mine = {"instagram_reel_views": 1000, "instagram_reel_engagement": 100, "tiktok_views": 1000}
+    theirs = {"instagram_reel_views": 4000, "instagram_reel_engagement": 400, "tiktok_views": 1000}
+    # Instagram 4x (both IG metrics agree), TikTok 1x -> sqrt(4 * 1) = 2x, not (4*4*1)^(1/3)
+    assert round(ratio(theirs, mine), 6) == 2.0

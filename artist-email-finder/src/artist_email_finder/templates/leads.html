@@ -87,7 +87,7 @@
       <div class="sub">{{ l.genres or l.discovered_via }}{% if l.location %} · {{ l.location }}{% endif %}</div>
     </td>
     <td><span class="badge lvl-{{ l.level_bucket }}">{{ l.level_ratio|ratio }}{% if l.level_bucket != 'unknown' %} · {{ {'match': 'your level', 'bigger': 'bigger', 'smaller': 'smaller'}[l.level_bucket] }}{% endif %}</span></td>
-    <td class="hide-sm">{{ l.metrics.get('instagram_engagement')|compact }}{% set er = l.metrics|eng_rate %}{% if er is not none %} <span class="small {{ 'badge conf-low' if er < 1 else 'muted' }}" title="engagement rate: of {{ l.metrics.instagram_followers|compact }} followers{{ ' (low: followers may be inflated)' if er < 1 else '' }}">{{ '%.1f'|format(er) }}%</span>{% elif l.metrics.get('instagram_followers') %}<span class="small muted" title="followers">{{ l.metrics.instagram_followers|compact }} fol.</span>{% endif %}</td>
+    <td class="hide-sm">{{ l.metrics.get('instagram_reel_engagement')|compact }}{% set er = l.metrics|eng_rate %}{% if er is not none %} <span class="small {{ 'badge conf-low' if er < 1 else 'muted' }}" title="engagement rate: of {{ l.metrics.instagram_followers|compact }} followers{{ ' (low: followers may be inflated)' if er < 1 else '' }}">{{ '%.1f'|format(er) }}%</span>{% elif l.metrics.get('instagram_followers') %}<span class="small muted" title="followers">{{ l.metrics.instagram_followers|compact }} fol.</span>{% endif %}</td>
     <td class="hide-sm">{{ l.metrics.get('tiktok_views')|compact }}{% if not l.metrics.get('tiktok_views') and l.metrics.get('tiktok_followers') %}<span class="small muted">{{ l.metrics.tiktok_followers|compact }} fol.</span>{% endif %}</td>
     <td class="hide-sm">{{ l.metrics.get('youtube_views')|compact }}</td>
     <td>

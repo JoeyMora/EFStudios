@@ -52,7 +52,11 @@ class Spotify:
     @staticmethod
     def _to_artist(item: dict, default_genre: str = "") -> Artist:
         followers = (item.get("followers") or {}).get("total")
+        images = item.get("images") or []  # largest first
+        image = next((i["url"] for i in reversed(images) if (i.get("width") or 0) >= 150),
+                     images[0]["url"] if images else "")
         return Artist(
+            image_url=image,
             name=item["name"],
             genres=item.get("genres") or ([default_genre] if default_genre else []),
             metrics={"spotify_followers": followers} if followers is not None else {},

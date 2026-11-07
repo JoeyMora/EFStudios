@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS leads (
     links TEXT DEFAULT '[]',
     metrics TEXT DEFAULT '{}',
     discovered_via TEXT DEFAULT '',
+    image_url TEXT DEFAULT '',
     status TEXT DEFAULT 'new',
     starred INTEGER DEFAULT 0,
     notes TEXT DEFAULT '',
@@ -95,6 +96,10 @@ class Store:
         self.path = str(path)
         with self.conn() as c:
             c.executescript(SCHEMA)
+            # Columns added after the first release.
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(leads)")}
+            if "image_url" not in cols:
+                c.execute("ALTER TABLE leads ADD COLUMN image_url TEXT DEFAULT ''")
 
     @contextmanager
     def conn(self):
@@ -179,12 +184,15 @@ class Store:
         fields = {
             "genres": "; ".join(artist.genres), "location": artist.location,
             "spotify_url": artist.spotify_url, "discovered_via": artist.discovered_via,
+            "image_url": artist.image_url,
         }
         if result:
             metrics.update({k: v for k, v in result.metrics.items() if v is not None})
             links = result.links or links
             fields.update(instagram=result.instagram.lower(), tiktok=result.tiktok.lower(),
                           website=result.website)
+            if result.image_url:
+                fields["image_url"] = result.image_url
 
         existing = self.find_lead(name=artist.name, instagram=fields.get("instagram", ""),
                                   tiktok=fields.get("tiktok", ""))
@@ -206,11 +214,12 @@ class Store:
                 cur = c.execute(
                     "INSERT INTO leads(name, name_key, genres, location, spotify_url, instagram, "
                     "tiktok, website, links, metrics, discovered_via, last_checked, created_at, "
-                    "updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "updated_at, image_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (artist.name, name_key(artist.name), fields["genres"], fields["location"],
                      fields["spotify_url"], fields.get("instagram", ""), fields.get("tiktok", ""),
                      fields.get("website", ""), json.dumps(links), json.dumps(metrics),
-                     fields["discovered_via"], now if result else None, now, now))
+                     fields["discovered_via"], now if result else None, now, now,
+                     fields.get("image_url", "")))
                 lead_id = cur.lastrowid
         if result:
             self.add_emails(lead_id, result.emails)
@@ -345,6 +354,8 @@ class Store:
             out["all"] = sum(out.values())
             out["with_email"] = c.execute(
                 "SELECT COUNT(*) FROM leads WHERE best_email != ''").fetchone()[0]
+            for r in c.execute("SELECT level_bucket, COUNT(*) n FROM leads GROUP BY level_bucket"):
+                out[f"level_{r['level_bucket']}"] = r["n"]
         return out
 
     # -- jobs -----------------------------------------------------------------

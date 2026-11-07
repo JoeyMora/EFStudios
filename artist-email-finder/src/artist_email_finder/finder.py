@@ -124,9 +124,11 @@ class Finder:
         crawl_new()
 
         def keep_ig(info: dict) -> None:
-            for key in ("instagram_followers", "instagram_engagement"):
+            for key in ("instagram_followers", "instagram_reel_engagement"):
                 if info.get(key) is not None:
                     result.metrics[key] = info[key]
+            if info.get("image_url"):
+                result.image_url = info["image_url"]
 
         # 4. Instagram and TikTok.
         ig = next((h for h in map(instagram_handle, links) if h), "")
@@ -196,6 +198,8 @@ class Finder:
                 result.metrics.update(sp.metrics)
                 if not artist.spotify_url:
                     artist.spotify_url = sp.spotify_url
+                if not artist.image_url:
+                    artist.image_url = sp.image_url
                 if not artist.genres:
                     artist.genres = sp.genres
         if self.lastfm and "lastfm_listeners" not in result.metrics:

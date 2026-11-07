@@ -20,14 +20,14 @@ def test_followers_in_profile_text():
 
 
 def test_ratio_uses_engagement_not_followers():
-    mine = {"instagram_engagement": 400, "tiktok_views": 2000}
+    mine = {"instagram_reel_engagement": 400, "tiktok_views": 2000}
     # Followers are ignored entirely.
     assert ratio({"instagram_followers": 1_000_000}, mine) is None
-    assert ratio({"instagram_engagement": 800}, mine) == 2.0
+    assert ratio({"instagram_reel_engagement": 800}, mine) == 2.0
     # geometric mean of 4x (IG) and 1x (TikTok) = 2x
-    assert round(ratio({"instagram_engagement": 1600, "tiktok_views": 2000}, mine), 6) == 2.0
+    assert round(ratio({"instagram_reel_engagement": 1600, "tiktok_views": 2000}, mine), 6) == 2.0
     # A big account with weak engagement is at my level.
-    assert bucket(ratio({"instagram_followers": 250_000, "instagram_engagement": 500}, mine),
+    assert bucket(ratio({"instagram_followers": 250_000, "instagram_reel_engagement": 500}, mine),
                   0.25, 4) == "match"
     assert bucket(10, 0.25, 4) == "bigger"
     assert bucket(0.1, 0.25, 4) == "smaller"
@@ -40,5 +40,5 @@ def test_typical_is_median():
 
 
 def test_engagement_rate():
-    assert engagement_rate({"instagram_engagement": 300, "instagram_followers": 10_000}) == 3.0
-    assert engagement_rate({"instagram_engagement": 300}) is None
+    assert engagement_rate({"instagram_reel_engagement": 300, "instagram_followers": 10_000}) == 3.0
+    assert engagement_rate({"instagram_reel_engagement": 300}) is None

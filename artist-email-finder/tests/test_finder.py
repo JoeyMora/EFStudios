@@ -70,7 +70,7 @@ class FakeGraph:
 
     def find(self, handle):
         self.calls.append(handle)
-        return ([], {"instagram_followers": 9100, "instagram_engagement": 410,
+        return ([], {"instagram_followers": 9100, "instagram_reel_engagement": 410,
                      "website": "https://linktr.ee/lilnova"})
 
 
@@ -85,7 +85,7 @@ def test_finder_instagram_and_tiktok_paths():
     assert finder.instagram.calls == ["lilnova"]
     assert "https://linktr.ee/lilnova" in http.fetched
     assert result.instagram == "lilnova" and result.tiktok == "lilnova"
-    assert result.metrics == {"instagram_followers": 9100, "instagram_engagement": 410,
+    assert result.metrics == {"instagram_followers": 9100, "instagram_reel_engagement": 410,
                               "tiktok_followers": 40000}
     assert [e.email for e in result.emails] == ["booking@lilnova.com", "nova@team.co"]
     # Instagram/TikTok pages themselves are never fetched directly.
@@ -94,22 +94,25 @@ def test_finder_instagram_and_tiktok_paths():
 
 class GraphHttp:
     def get_json(self, url, params=None, **kw):
-        assert "media.limit(12){like_count,comments_count" in params["fields"]
+        assert "media_product_type" in params["fields"]
         return {"business_discovery": {
             "biography": "booking: hi@nova.co", "followers_count": 20000, "website": "",
             "media": {"data": [
-                {"like_count": 300, "comments_count": 20}, {"like_count": 280, "comments_count": 10},
-                {"comments_count": 5},  # likes hidden: ignored
-                {"like_count": 9000, "comments_count": 400}, {"like_count": 350, "comments_count": 15},
+                {"like_count": 300, "comments_count": 20, "media_product_type": "REELS"},
+                {"like_count": 99999, "comments_count": 0, "media_product_type": "FEED"},  # photo post: ignored
+                {"like_count": 280, "comments_count": 10, "media_product_type": "REELS"},
+                {"comments_count": 5, "media_product_type": "REELS"},  # likes hidden: ignored
+                {"like_count": 9000, "comments_count": 400, "media_product_type": "REELS"},
+                {"like_count": 350, "comments_count": 15, "media_product_type": "REELS"},
             ]}}}
 
 
-def test_instagram_engagement_is_median_of_recent_posts():
+def test_instagram_engagement_uses_reels_only():
     from artist_email_finder.sources.instagram import InstagramGraph
     findings, info = InstagramGraph(GraphHttp(), "tok", "123").find("lilnova")
     assert [f.email for f in findings] == ["hi@nova.co"]
     assert info["instagram_followers"] == 20000
-    assert info["instagram_engagement"] == 342   # median of 290, 320, 365, 9400
+    assert info["instagram_reel_engagement"] == 342   # median of 290, 320, 365, 9400
 
 
 class YtHttp:

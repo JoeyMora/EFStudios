@@ -16,6 +16,7 @@ class Artist:
     location: str = ""
     spotify_url: str = ""
     discovered_via: str = ""
+    image_url: str = ""
 
 
 @dataclass
@@ -48,5 +49,6 @@ class ArtistResult:
     instagram: str = ""     # handle
     tiktok: str = ""        # handle
     website: str = ""
+    image_url: str = ""
     links: list[str] = field(default_factory=list)   # every artist link seen
     metrics: dict[str, int] = field(default_factory=dict)

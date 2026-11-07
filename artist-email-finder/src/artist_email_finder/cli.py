@@ -25,7 +25,7 @@ from .sources.spotify import Spotify
 
 OUTPUT_FIELDS = [
     "artist", "email", "confidence", "score", "sources", "found_on", "context",
-    "instagram", "tiktok", "instagram_engagement", "tiktok_views", "youtube_views",
+    "instagram", "tiktok", "instagram_reel_engagement", "tiktok_views", "youtube_views",
     "instagram_followers", "tiktok_followers", "spotify_followers",
     "lastfm_listeners", "youtube_subscribers", "genres", "location", "spotify_url",
     "discovered_via", "pages_checked",
