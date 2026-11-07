@@ -225,10 +225,15 @@ def cmd_discover(args, settings: Settings, http: HttpClient) -> int:
 
 
 def cmd_serve(args, settings: Settings, http: HttpClient) -> int:
+    import os
+    os.environ["FLASK_SKIP_DOTENV"] = "1"   # .env is already loaded by this CLI
+    import flask.cli
     from .web import create_app
+    flask.cli.show_server_banner = lambda *a, **k: None
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)  # no per-request lines or dev-server banner
     app = create_app(args.db, settings)
     url = f"http://{args.host}:{args.port}/"
-    print(f"Artist Finder running at {url}  (Ctrl+C to stop)", file=sys.stderr)
+    print(f"Artist Finder is running at {url}", file=sys.stderr)
     if not args.no_browser:
         import threading
         import webbrowser
